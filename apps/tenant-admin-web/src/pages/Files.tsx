@@ -5,6 +5,7 @@ import {
 import { DeleteOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { tenantApi } from '../api/client';
+import { useTenantAuthorizations } from '../hooks/useTenantAuthorizations';
 
 interface FileItem {
   id: string;
@@ -66,6 +67,7 @@ export default function FilesPage() {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<FileFilters>({});
   const [stats, setStats] = useState<FileStats | null>(null);
+  const { auth } = useTenantAuthorizations();
 
   const loadStats = useCallback(async () => {
     const res = await tenantApi.fileStats();
@@ -187,9 +189,11 @@ export default function FilesPage() {
               render: (_, r) => (
                 <Space>
                   <a href={r.url} target="_blank" rel="noreferrer">查看</a>
-                  <Popconfirm title="确定删除此文件？" onConfirm={() => deleteFile(r.id)}>
-                    <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
-                  </Popconfirm>
+                  {auth.allowDeleteFiles && (
+                    <Popconfirm title="确定删除此文件？" onConfirm={() => deleteFile(r.id)}>
+                      <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+                    </Popconfirm>
+                  )}
                 </Space>
               ),
             },

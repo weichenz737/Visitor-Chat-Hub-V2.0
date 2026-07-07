@@ -28,18 +28,20 @@ export interface AuthState {
 
 export interface Session {
   id: string;
-  status: 'WAITING' | 'ACTIVE' | 'CLOSED';
+  status: 'WAITING' | 'ACTIVE' | 'CLOSED' | 'REMOVED';
   conversationId?: string;
   userId: string;
   agentId?: string | null;
   user?: { id: string; nickname: string };
   agent?: { id: string; name: string };
+  removedBy?: { id: string; name: string } | null;
   messages?: Message[];
   createdAt: string;
   updatedAt: string;
   closedAt?: string | null;
   closedBy?: 'USER' | 'AGENT' | 'SYSTEM' | null;
   closedReason?: 'MANUAL' | 'TIMEOUT' | 'DISCONNECT' | null;
+  removedAt?: string | null;
 }
 
 export interface Conversation {

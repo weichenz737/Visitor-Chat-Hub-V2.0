@@ -16,6 +16,7 @@ import { ChatAdminService } from '../chat-admin/chat-admin.service';
 import { FileService } from '../file/file.service';
 import { TransferService } from '../transfer/transfer.service';
 import { ChatGateway } from '../websocket/chat.gateway';
+import { TenantAuthorizationService } from '../../common/services/tenant-authorization.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { StaffRolesGuard } from '../../common/guards/staff-roles.guard';
@@ -34,7 +35,13 @@ export class TenantAdminController {
     private readonly fileService: FileService,
     private readonly transferService: TransferService,
     private readonly moduleRef: ModuleRef,
+    private readonly tenantAuth: TenantAuthorizationService,
   ) {}
+
+  @Get('authorizations')
+  authorizations(@CurrentUser() user: AuthPayload) {
+    return this.tenantAdminService.getAuthorizations(user.tenantId!);
+  }
 
   @Get('dashboard')
   dashboard(@CurrentUser() user: AuthPayload) {
@@ -209,16 +216,30 @@ export class TenantAdminController {
   }
 
   @Delete('messages/:id')
-  deleteMessage(@CurrentUser() user: AuthPayload, @Param('id') id: string) {
+  async deleteMessage(@CurrentUser() user: AuthPayload, @Param('id') id: string) {
+    await this.tenantAuth.assertAllowDeleteMessages(user.tenantId!);
     return this.chatAdminService.deleteMessage(user.tenantId!, id);
   }
 
   @Delete('chat-users/:userId/messages')
-  deleteChatUserMessages(
+  async deleteChatUserMessages(
     @CurrentUser() user: AuthPayload,
     @Param('userId') userId: string,
   ) {
+    await this.tenantAuth.assertAllowDeleteMessages(user.tenantId!);
     return this.chatAdminService.deleteChatUserMessages(user.tenantId!, userId);
+  }
+
+  @Delete('chat-users/:userId/session')
+  removeVisitorSession(
+    @CurrentUser() user: AuthPayload,
+    @Param('userId') userId: string,
+  ) {
+    return this.tenantAdminService.removeVisitorSession(
+      user.tenantId!,
+      userId,
+      user.sub,
+    );
   }
 
   @Post('sessions/:id/transfer')
@@ -266,7 +287,8 @@ export class TenantAdminController {
   }
 
   @Delete('files/:id')
-  deleteFile(@CurrentUser() user: AuthPayload, @Param('id') id: string) {
+  async deleteFile(@CurrentUser() user: AuthPayload, @Param('id') id: string) {
+    await this.tenantAuth.assertAllowDeleteFiles(user.tenantId!);
     return this.fileService.delete(user.tenantId!, id);
   }
 

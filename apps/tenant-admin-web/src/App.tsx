@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ConfigProvider, App as AntApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { useChatStore } from '@cs/shared/src/store';
@@ -16,17 +16,14 @@ import SettingsPage from './pages/Settings';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { auth } = useChatStore();
-  const navigate = useNavigate();
 
   useEffect(() => {
     setTokenGetter(() => useChatStore.getState().auth?.token ?? null);
   }, []);
 
-  useEffect(() => {
-    if (!auth || auth.role !== 'tenant_admin') navigate('/login');
-  }, [auth, navigate]);
-
-  if (!auth || auth.role !== 'tenant_admin') return null;
+  if (!auth || auth.role !== 'tenant_admin') {
+    return <Navigate to="/login" replace />;
+  }
   return <>{children}</>;
 }
 

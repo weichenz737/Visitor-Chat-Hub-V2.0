@@ -5,6 +5,7 @@ import {
 import { DeleteOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { adminApi } from '../../api/client';
+import { useTenantAgentOptions } from '../../hooks/useTenantAgentOptions';
 
 interface FileItem {
   id: string;
@@ -32,9 +33,9 @@ interface FileFilters {
   keyword?: string;
   category?: string;
   tenantCode?: string;
+  uploaderAgentId?: string;
   startTime?: string;
   endTime?: string;
-  uploader?: string;
 }
 
 function formatSize(bytes: number) {
@@ -55,7 +56,7 @@ function buildFilters(values: Record<string, unknown>): FileFilters {
     keyword: values.keyword as string | undefined,
     category: values.category as string | undefined,
     tenantCode: values.tenantCode as string | undefined,
-    uploader: values.uploader as string | undefined,
+    uploaderAgentId: values.uploaderAgentId as string | undefined,
     startTime: timeRange?.[0]?.toISOString(),
     endTime: timeRange?.[1]?.toISOString(),
   };
@@ -69,6 +70,21 @@ export default function FilesPage() {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<FileFilters>({});
   const [stats, setStats] = useState<FileStats | null>(null);
+  const {
+    tenantOptions,
+    agentOptions,
+    agentsLoading,
+    loadAgents,
+  } = useTenantAgentOptions();
+
+  const selectedTenant = Form.useWatch('tenantCode', form);
+
+  useEffect(() => {
+    loadAgents(selectedTenant);
+    if (!selectedTenant) {
+      form.setFieldValue('uploaderAgentId', undefined);
+    }
+  }, [selectedTenant, loadAgents, form]);
 
   const loadStats = useCallback(async () => {
     const res = await adminApi.fileStats();
@@ -96,6 +112,20 @@ export default function FilesPage() {
     message.success('文件已删除');
     load();
     loadStats();
+  };
+
+  const onTenantChange = (tenantCode?: string) => {
+    form.setFieldValue('uploaderAgentId', undefined);
+    loadAgents(tenantCode);
+  };
+
+  const onReset = () => {
+    form.resetFields();
+    loadAgents(undefined);
+    const empty: FileFilters = {};
+    setFilters(empty);
+    setPage(1);
+    load(1, empty);
   };
 
   return (
@@ -127,14 +157,31 @@ export default function FilesPage() {
             load(1, f);
           }}
         >
+          <Form.Item name="tenantCode">
+            <Select
+              allowClear
+              showSearch
+              placeholder="所属租户"
+              style={{ width: 200 }}
+              optionFilterProp="label"
+              options={tenantOptions}
+              onChange={onTenantChange}
+            />
+          </Form.Item>
+          <Form.Item name="uploaderAgentId">
+            <Select
+              allowClear
+              showSearch
+              placeholder={selectedTenant ? '上传客服' : '请先选择租户'}
+              style={{ width: 220 }}
+              optionFilterProp="label"
+              options={agentOptions}
+              disabled={!selectedTenant}
+              loading={agentsLoading}
+            />
+          </Form.Item>
           <Form.Item name="keyword">
             <Input placeholder="搜索文件名" allowClear prefix={<SearchOutlined />} />
-          </Form.Item>
-          <Form.Item name="uploader">
-            <Input placeholder="上传者（客服/访客）" allowClear />
-          </Form.Item>
-          <Form.Item name="tenantCode">
-            <Input placeholder="租户代码" allowClear />
           </Form.Item>
           <Form.Item name="category">
             <Select placeholder="文件类型" allowClear style={{ width: 120 }}
@@ -148,7 +195,12 @@ export default function FilesPage() {
           <Form.Item name="timeRange">
             <DatePicker.RangePicker showTime placeholder={['上传开始', '上传结束']} />
           </Form.Item>
-          <Form.Item><Button type="primary" htmlType="submit">搜索</Button></Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" htmlType="submit">搜索</Button>
+              <Button onClick={onReset}>重置</Button>
+            </Space>
+          </Form.Item>
         </Form>
       </Card>
 

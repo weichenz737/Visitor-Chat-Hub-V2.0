@@ -26,6 +26,9 @@ export class TransferService {
     if (session.status === 'CLOSED') {
       throw new BadRequestException('Session is closed');
     }
+    if (session.status === 'REMOVED') {
+      throw new BadRequestException('Session is removed');
+    }
 
     await this.agentService.findById(tenantId, toAgentId);
 
@@ -62,6 +65,9 @@ export class TransferService {
     const session = await this.sessionService.findById(tenantId, sessionId);
     if (session.status === 'CLOSED') {
       throw new BadRequestException('Session is closed');
+    }
+    if (session.status === 'REMOVED') {
+      throw new BadRequestException('Session is removed');
     }
 
     const fromAgentId = session.agentId;

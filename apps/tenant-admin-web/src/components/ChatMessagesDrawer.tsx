@@ -41,6 +41,7 @@ interface ChatMessagesDrawerProps {
   user?: ChatUserRef | null;
   onClose: () => void;
   onChanged?: () => void;
+  allowDeleteMessages?: boolean;
 }
 
 export default function ChatMessagesDrawer({
@@ -48,6 +49,7 @@ export default function ChatMessagesDrawer({
   user,
   onClose,
   onChanged,
+  allowDeleteMessages = false,
 }: ChatMessagesDrawerProps) {
   const [form] = Form.useForm();
   const listRef = useRef<HTMLDivElement>(null);
@@ -132,7 +134,7 @@ export default function ChatMessagesDrawer({
       width={480}
       styles={{ body: { padding: 0 } }}
       extra={
-        user ? (
+        user && allowDeleteMessages ? (
           <Popconfirm title="确定清空该用户所有聊天记录？" onConfirm={deleteAllMessages}>
             <Button danger size="small">清空全部</Button>
           </Popconfirm>
@@ -173,7 +175,10 @@ export default function ChatMessagesDrawer({
           {loading ? (
             <div className="chat-transcript-empty"><Spin /></div>
           ) : (
-            <ChatTranscript messages={messages} onDelete={deleteMessage} />
+            <ChatTranscript
+              messages={messages}
+              onDelete={allowDeleteMessages ? deleteMessage : undefined}
+            />
           )}
         </div>
 

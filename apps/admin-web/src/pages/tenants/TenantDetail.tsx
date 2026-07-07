@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
-  Button, Card, Descriptions, Drawer, Form, Input, InputNumber, List, Modal, Popconfirm, Select, Space, Table,
-  Tabs, Typography, message, Tag, Empty,
+  Button, Card, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table,
+  Tabs, Typography, message, Tag,
 } from 'antd';
-import { CopyOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { CopyOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { adminApi, type TenantItem, type AgentItem, type QuickReplyItem } from '../../api/client';
 import {
-  StatusTag, tenantStatusMap, agentAccountStatusMap, agentRoleMap, sessionStatusMap,
+  StatusTag, tenantStatusMap, agentAccountStatusMap, agentRoleMap,
 } from '../../utils/status';
 import { accountRules } from '../../utils/account';
 
@@ -21,11 +21,6 @@ export default function TenantDetailPage() {
 
   const [tenant, setTenant] = useState<TenantItem | null>(null);
   const [agents, setAgents] = useState<AgentItem[]>([]);
-  const [sessions, setSessions] = useState<unknown[]>([]);
-  const [sessionTotal, setSessionTotal] = useState(0);
-  const [sessionPage, setSessionPage] = useState(1);
-  const [sessionKeyword, setSessionKeyword] = useState('');
-  const [sessionDrawer, setSessionDrawer] = useState<{ open: boolean; messages?: unknown[] }>({ open: false });
   const [globalSettings, setGlobalSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [agentModal, setAgentModal] = useState<{ open: boolean; editing?: AgentItem }>({ open: false });
@@ -36,51 +31,85 @@ export default function TenantDetailPage() {
   const [qrModal, setQrModal] = useState<{ open: boolean; editing?: QuickReplyItem }>({ open: false });
   const [qrForm] = Form.useForm();
   const [settingsForm] = Form.useForm();
-  const [sessionForm] = Form.useForm();
+  const [authForm] = Form.useForm();
+  const [infoForm] = Form.useForm();
+  const [statusForm] = Form.useForm();
 
   const load = useCallback(async () => {
     if (!tenantCode) return;
     setLoading(true);
     try {
-      const [t, a, s, cfg, qr, ts] = await Promise.all([
+      const [t, a, cfg, qr, ts] = await Promise.all([
         adminApi.tenant(tenantCode),
         adminApi.tenantAgents(tenantCode, { page: 1, limit: 50 }),
-        adminApi.sessions({ tenantCode, page: sessionPage, limit: 10, keyword: sessionKeyword }),
         adminApi.settings(),
         adminApi.tenantQuickReplies(tenantCode),
         adminApi.tenantSettings(tenantCode),
       ]);
       setTenant(t);
+      infoForm.setFieldsValue({
+        name: t.name,
+        contactName: t.contactName,
+        contactPhone: t.contactPhone,
+        remark: t.remark,
+      });
+      statusForm.setFieldsValue({ status: t.status });
       setAgents(a.items);
-      setSessions(s.items);
-      setSessionTotal(s.total);
       setGlobalSettings(cfg);
-      settingsForm.setFieldsValue(ts);
+      const {
+        allowDeleteMessages,
+        allowDeleteSessions,
+        allowDeleteFiles,
+        maxAgentCount,
+        ...brandSettings
+      } = ts as Record<string, string>;
+      settingsForm.setFieldsValue(brandSettings);
+      authForm.setFieldsValue({
+        allowDeleteMessages: allowDeleteMessages !== 'false',
+        allowDeleteSessions: allowDeleteSessions !== 'false',
+        allowDeleteFiles: allowDeleteFiles !== 'false',
+        maxAgentCount: Number(maxAgentCount) || 0,
+      });
       setQuickReplies(qr);
     } finally {
       setLoading(false);
     }
-  }, [tenantCode, sessionPage, sessionKeyword, settingsForm]);
-
-  const searchSessions = async (kw: string, p = 1) => {
-    if (!tenantCode) return;
-    setSessionKeyword(kw);
-    setSessionPage(p);
-    const s = await adminApi.sessions({ tenantCode, page: p, limit: 10, keyword: kw });
-    setSessions(s.items);
-    setSessionTotal(s.total);
-  };
-
-  const viewSessionMessages = async (sessionId: string) => {
-    const res = await adminApi.sessionMessages(sessionId);
-    setSessionDrawer({ open: true, messages: res.messages });
-  };
+  }, [tenantCode, settingsForm, authForm, infoForm, statusForm]);
 
   const saveTenantSettings = async () => {
     if (!tenantCode) return;
     const values = await settingsForm.validateFields();
     await adminApi.updateTenantSettings(tenantCode, values);
     message.success('租户设置已保存');
+    load();
+  };
+
+  const saveTenantAuthorizations = async () => {
+    if (!tenantCode) return;
+    const values = await authForm.validateFields();
+    await adminApi.updateTenantSettings(tenantCode, {
+      allowDeleteMessages: values.allowDeleteMessages ? 'true' : 'false',
+      allowDeleteSessions: values.allowDeleteSessions ? 'true' : 'false',
+      allowDeleteFiles: values.allowDeleteFiles ? 'true' : 'false',
+      maxAgentCount: String(values.maxAgentCount ?? 0),
+    });
+    message.success('授权配置已保存，立即生效');
+    load();
+  };
+
+  const saveTenantInfo = async () => {
+    if (!tenantCode) return;
+    const values = await infoForm.validateFields();
+    await adminApi.updateTenant(tenantCode, values);
+    message.success('租户信息已保存');
+    load();
+  };
+
+  const saveTenantStatus = async () => {
+    if (!tenantCode) return;
+    const { status } = await statusForm.validateFields();
+    await adminApi.updateTenantStatus(tenantCode, status);
+    message.success('租户状态已更新');
     load();
   };
 
@@ -141,31 +170,40 @@ export default function TenantDetailPage() {
       key: 'info',
       label: '基础信息',
       children: (
-        <Descriptions bordered column={2}>
-          <Descriptions.Item label="企业编码" span={2}>
-            <Space>
-              <Text copyable code>{tenant.tenantCode}</Text>
-              <Text type="secondary">（客服端登录时填写，创建后不可修改）</Text>
-            </Space>
-          </Descriptions.Item>
-          <Descriptions.Item label="企业名称">{tenant.name}</Descriptions.Item>
-          <Descriptions.Item label="管理员账号">{tenant.adminEmail}</Descriptions.Item>
-          <Descriptions.Item label="状态"><StatusTag value={tenant.status} map={tenantStatusMap} /></Descriptions.Item>
-          <Descriptions.Item label="创建时间">{dayjs(tenant.createdAt).format('YYYY-MM-DD HH:mm')}</Descriptions.Item>
-          <Descriptions.Item label="Slug" span={2}>
-            <Space>
-              <Text code>{tenant.slug}</Text>
-              <Text type="secondary">（URL / 品牌展示，SDK 可选配置）</Text>
-            </Space>
-          </Descriptions.Item>
-          <Descriptions.Item label="域名">{tenant.domain ?? '-'}</Descriptions.Item>
-          <Descriptions.Item label="联系人">{tenant.contactName ?? '-'}</Descriptions.Item>
-          <Descriptions.Item label="联系电话">{tenant.contactPhone ?? '-'}</Descriptions.Item>
-          <Descriptions.Item label="客服数量">{tenant._count?.agents ?? 0}</Descriptions.Item>
-          <Descriptions.Item label="用户数量">{tenant._count?.users ?? 0}</Descriptions.Item>
-          <Descriptions.Item label="会话数量" span={2}>{tenant._count?.sessions ?? 0}</Descriptions.Item>
-          <Descriptions.Item label="备注" span={2}>{tenant.remark ?? '-'}</Descriptions.Item>
-        </Descriptions>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Descriptions bordered column={2}>
+            <Descriptions.Item label="企业编码" span={2}>
+              <Space>
+                <Text copyable code>{tenant.tenantCode}</Text>
+                <Text type="secondary">（客服端登录时填写，创建后不可修改）</Text>
+              </Space>
+            </Descriptions.Item>
+            <Descriptions.Item label="管理员账号">{tenant.adminEmail}</Descriptions.Item>
+            <Descriptions.Item label="状态"><StatusTag value={tenant.status} map={tenantStatusMap} /></Descriptions.Item>
+            <Descriptions.Item label="创建时间">{dayjs(tenant.createdAt).format('YYYY-MM-DD HH:mm')}</Descriptions.Item>
+            <Descriptions.Item label="Slug" span={2}>
+              <Space>
+                <Text code>{tenant.slug}</Text>
+                <Text type="secondary">（URL / 品牌展示，SDK 可选配置）</Text>
+              </Space>
+            </Descriptions.Item>
+            <Descriptions.Item label="域名">{tenant.domain ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="客服数量">{tenant._count?.agents ?? 0}</Descriptions.Item>
+            <Descriptions.Item label="用户数量">{tenant._count?.users ?? 0}</Descriptions.Item>
+            <Descriptions.Item label="会话数量">{tenant._count?.sessions ?? 0}</Descriptions.Item>
+          </Descriptions>
+          <Card size="small" title="编辑租户">
+            <Form form={infoForm} layout="vertical" style={{ maxWidth: 560 }}>
+              <Form.Item name="name" label="企业名称" rules={[{ required: true, message: '请输入企业名称' }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="contactName" label="联系人"><Input /></Form.Item>
+              <Form.Item name="contactPhone" label="联系电话"><Input /></Form.Item>
+              <Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item>
+              <Button type="primary" onClick={saveTenantInfo}>保存</Button>
+            </Form>
+          </Card>
+        </Space>
       ),
     },
     {
@@ -284,45 +322,6 @@ export default function TenantDetailPage() {
       ),
     },
     {
-      key: 'sessions',
-      label: '聊天记录',
-      children: (
-        <>
-          <Form form={sessionForm} layout="inline" style={{ marginBottom: 16 }} onFinish={(v) => searchSessions(v.keyword ?? '', 1)}>
-            <Form.Item name="keyword">
-              <Input placeholder="搜索访客 / 客服" allowClear prefix={<SearchOutlined />} />
-            </Form.Item>
-            <Form.Item><Button type="primary" htmlType="submit">搜索</Button></Form.Item>
-          </Form>
-          <Table
-            rowKey="id"
-            dataSource={sessions as Record<string, unknown>[]}
-            loading={loading}
-            pagination={{
-              current: sessionPage,
-              total: sessionTotal,
-              pageSize: 10,
-              onChange: (p) => searchSessions(sessionKeyword, p),
-              showTotal: (t) => `共 ${t} 条`,
-            }}
-            columns={[
-              { title: '访客', render: (_, r) => (r.user as { nickname: string })?.nickname },
-              { title: '客服', render: (_, r) => (r.agent as { name: string })?.name ?? '-' },
-              { title: '状态', dataIndex: 'status', render: (v: string) => <StatusTag value={v} map={sessionStatusMap} /> },
-              { title: '消息数', render: (_, r) => (r._count as { messages: number })?.messages ?? 0 },
-              { title: '时间', dataIndex: 'createdAt', render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm') },
-              {
-                title: '操作',
-                render: (_, r) => (
-                  <Button type="link" size="small" onClick={() => viewSessionMessages(r.id as string)}>查看详情</Button>
-                ),
-              },
-            ]}
-          />
-        </>
-      ),
-    },
-    {
       key: 'api',
       label: 'API 管理',
       children: (
@@ -356,26 +355,74 @@ export default function TenantDetailPage() {
       ),
     },
     {
+      key: 'authorization',
+      label: '授权管理',
+      children: (
+        <Card size="small" title="功能授权">
+          <Typography.Paragraph type="secondary">
+            配置企业后台可用功能。修改后立即生效，企业端页面与接口均会校验。
+            {tenant && (
+              <> 当前客服数量：{tenant._count?.agents ?? agents.length}</>
+            )}
+          </Typography.Paragraph>
+          <Form form={authForm} layout="vertical" style={{ maxWidth: 560 }}>
+            <Form.Item
+              name="allowDeleteMessages"
+              label="允许删除聊天记录"
+              valuePropName="checked"
+            >
+              <Switch checkedChildren="开" unCheckedChildren="关" />
+            </Form.Item>
+            <Form.Item
+              name="allowDeleteSessions"
+              label="允许删除访客会话"
+              valuePropName="checked"
+            >
+              <Switch checkedChildren="开" unCheckedChildren="关" />
+            </Form.Item>
+            <Form.Item
+              name="allowDeleteFiles"
+              label="允许删除文件"
+              valuePropName="checked"
+            >
+              <Switch checkedChildren="开" unCheckedChildren="关" />
+            </Form.Item>
+            <Form.Item
+              name="maxAgentCount"
+              label="授权客服数量"
+              extra="0 表示不限制；达到上限后企业无法继续新增客服"
+            >
+              <InputNumber min={0} style={{ width: '100%' }} />
+            </Form.Item>
+            <Button type="primary" onClick={saveTenantAuthorizations}>保存授权</Button>
+          </Form>
+        </Card>
+      ),
+    },
+    {
       key: 'settings',
       label: '设置',
       children: (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
           <Card size="small" title="租户状态">
-            <Space>
-              <StatusTag value={tenant.status} map={tenantStatusMap} />
-              {tenant.status !== 'ACTIVE' && (
-                <Button size="small" onClick={async () => {
-                  await adminApi.updateTenantStatus(tenantCode!, 'ACTIVE');
-                  load();
-                }}>启用</Button>
-              )}
-              {tenant.status === 'ACTIVE' && (
-                <Button size="small" danger onClick={async () => {
-                  await adminApi.updateTenantStatus(tenantCode!, 'SUSPENDED');
-                  load();
-                }}>冻结</Button>
-              )}
-            </Space>
+            <Form form={statusForm} layout="inline">
+              <Form.Item label="当前状态">
+                <StatusTag value={tenant.status} map={tenantStatusMap} />
+              </Form.Item>
+              <Form.Item name="status" label="修改为" rules={[{ required: true }]}>
+                <Select
+                  style={{ width: 140 }}
+                  options={[
+                    { value: 'ACTIVE', label: '启用' },
+                    { value: 'SUSPENDED', label: '冻结' },
+                    { value: 'DISABLED', label: '已停用' },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" onClick={saveTenantStatus}>保存状态</Button>
+              </Form.Item>
+            </Form>
           </Card>
           <Card size="small" title="品牌与聊天">
             <Form form={settingsForm} layout="vertical" style={{ maxWidth: 560 }}>
@@ -472,29 +519,6 @@ export default function TenantDetailPage() {
           </Form.Item>
         </Form>
       </Modal>
-
-      <Drawer
-        title="聊天详情"
-        open={sessionDrawer.open}
-        onClose={() => setSessionDrawer({ open: false })}
-        width={480}
-      >
-        <List
-          dataSource={sessionDrawer.messages ?? []}
-          locale={{ emptyText: <Empty description="暂无消息" /> }}
-          renderItem={(item) => {
-            const m = item as { senderType: string; content: string; createdAt: string; type: string };
-            return (
-              <List.Item>
-                <List.Item.Meta
-                  title={`${m.senderType} · ${dayjs(m.createdAt).format('HH:mm:ss')}`}
-                  description={m.type === 'TEXT' ? m.content : `[${m.type}] ${m.content}`}
-                />
-              </List.Item>
-            );
-          }}
-        />
-      </Drawer>
     </Space>
   );
 }

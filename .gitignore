@@ -14,3 +14,4 @@ backend/uploads/
 .DS_Store
 doc/extracted/
 deploy/jiashui.pem
+*.tsbuildinfo

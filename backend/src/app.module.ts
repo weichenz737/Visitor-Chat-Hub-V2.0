@@ -17,6 +17,7 @@ import { UploadModule } from './modules/upload/upload.module';
 import { WebSocketModule } from './modules/websocket/websocket.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { TenantAdminModule } from './modules/tenant-admin/tenant-admin.module';
+import { TenantAuthorizationModule } from './common/services/tenant-authorization.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -24,6 +25,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     RedisModule,
+    TenantAuthorizationModule,
     TenantModule,
     AuthModule,
     UserModule,

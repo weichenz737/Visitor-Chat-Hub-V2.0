@@ -26,4 +26,5 @@ export const sessionStatusMap = {
   WAITING: { label: '等待中', color: 'orange' },
   ACTIVE: { label: '进行中', color: 'green' },
   CLOSED: { label: '已结束', color: 'default' },
+  REMOVED: { label: '已移除', color: 'red' },
 } as const;

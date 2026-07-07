@@ -35,6 +35,7 @@ enum SessionStatus {
   WAITING
   ACTIVE
   CLOSED
+  REMOVED
 }
 
 enum SessionClosedBy {
@@ -87,6 +88,7 @@ model Tenant {
   quickReplies QuickReply[]
   tenantSettings TenantSetting[]
   transfers   Transfer[]
+  conversationAgentArchives ConversationAgentArchive[]
 
   @@map("tenants")
 }
@@ -168,6 +170,8 @@ model Agent {
   quickReplies    QuickReply[]
   transfersFrom   Transfer[] @relation("TransferFrom")
   transfersTo     Transfer[] @relation("TransferTo")
+  removedSessions Session[] @relation("SessionRemovedBy")
+  conversationArchives ConversationAgentArchive[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, agentCode])
@@ -185,9 +189,26 @@ model Conversation {
   tenant   Tenant    @relation(fields: [tenantId], references: [id])
   user     User      @relation(fields: [userId], references: [id])
   sessions Session[]
+  agentArchives ConversationAgentArchive[]
 
   @@index([tenantId])
   @@map("conversations")
+}
+
+model ConversationAgentArchive {
+  id             String   @id @default(uuid())
+  tenantId       String   @map("tenant_id")
+  agentId        String   @map("agent_id")
+  conversationId String   @map("conversation_id")
+  archivedAt     DateTime @default(now()) @map("archived_at")
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  agent        Agent        @relation(fields: [agentId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, conversationId])
+  @@index([tenantId])
+  @@map("conversation_agent_archives")
 }
 
 model Session {
@@ -203,11 +224,14 @@ model Session {
   closedAt         DateTime?     @map("closed_at")
   closedBy         SessionClosedBy? @map("closed_by")
   closedReason     SessionCloseReason? @map("closed_reason")
+  removedAt        DateTime?     @map("removed_at")
+  removedByAgentId String?       @map("removed_by_agent_id")
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id])
   conversation Conversation @relation(fields: [conversationId], references: [id])
   user         User         @relation(fields: [userId], references: [id])
   agent        Agent?       @relation(fields: [agentId], references: [id])
+  removedBy    Agent?       @relation("SessionRemovedBy", fields: [removedByAgentId], references: [id])
   messages     Message[]
   transfers    Transfer[]
 

@@ -21,6 +21,8 @@ export class ChatAdminService {
       startTime?: string;
       endTime?: string;
       sessionStatus?: string;
+      agentKeyword?: string;
+      agentId?: string;
     },
   ) {
     let resolvedTenantId = tenantId;
@@ -64,6 +66,30 @@ export class ChatAdminService {
       params.push(query.sessionStatus);
       outerWhere.push(`cu."latestSessionStatus" = $${params.length}`);
     }
+    if (query.agentKeyword) {
+      params.push(`%${query.agentKeyword}%`);
+      outerWhere.push(`(
+        COALESCE(cu."latestAgentName", '') ILIKE $${params.length}
+        OR COALESCE(cu."agentNames", '') ILIKE $${params.length}
+      )`);
+    }
+    if (query.agentId) {
+      params.push(query.agentId);
+      outerWhere.push(`(
+        cu."latestSessionAgentId" = $${params.length}
+        OR EXISTS (
+          SELECT 1 FROM sessions s_agf
+          WHERE s_agf.user_id = cu.id AND s_agf.agent_id = $${params.length}
+        )
+        OR EXISTS (
+          SELECT 1 FROM messages m_agf
+          INNER JOIN sessions s_agf ON s_agf.id = m_agf.session_id
+          WHERE s_agf.user_id = cu.id
+            AND m_agf.sender_type = 'AGENT'
+            AND m_agf.sender_id = $${params.length}
+        )
+      )`);
+    }
     const outerWhereClause = outerWhere.length
       ? `WHERE ${outerWhere.join(' AND ')}`
       : '';
@@ -82,6 +108,23 @@ export class ChatAdminService {
           ORDER BY m2.created_at DESC
           LIMIT 1
         ) AS "latestSessionStatus",
+        (
+          SELECT s2.removed_at
+          FROM sessions s2
+          INNER JOIN messages m2 ON m2.session_id = s2.id
+          WHERE s2.user_id = u.id
+          ORDER BY m2.created_at DESC
+          LIMIT 1
+        ) AS "removedAt",
+        (
+          SELECT a.name
+          FROM sessions s2
+          INNER JOIN messages m2 ON m2.session_id = s2.id
+          LEFT JOIN agents a ON a.id = s2.removed_by_agent_id
+          WHERE s2.user_id = u.id
+          ORDER BY m2.created_at DESC
+          LIMIT 1
+        ) AS "removedByName",
         (
           SELECT s2.id
           FROM sessions s2

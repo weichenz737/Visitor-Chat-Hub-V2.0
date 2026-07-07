@@ -35,6 +35,9 @@ export default function TenantLayout() {
   const location = useLocation();
   const { auth, logout } = useChatStore();
   const { token } = theme.useToken();
+  const roleLabel = auth?.staffRole
+    ? agentRoleMap[auth.staffRole as keyof typeof agentRoleMap]
+    : undefined;
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -83,8 +86,8 @@ export default function TenantLayout() {
             <Space style={{ cursor: 'pointer' }}>
               <UserOutlined />
               <Typography.Text>{auth?.name}</Typography.Text>
-              {auth?.staffRole && (
-                <Tag>{agentRoleMap[auth.staffRole as keyof typeof agentRoleMap]}</Tag>
+              {roleLabel && roleLabel !== auth?.name && (
+                <Tag>{roleLabel}</Tag>
               )}
               {auth?.tenantCode && <Tag color="blue">{auth.tenantCode}</Tag>}
             </Space>
