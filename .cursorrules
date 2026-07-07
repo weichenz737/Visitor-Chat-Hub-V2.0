@@ -1,0 +1,47 @@
+This is a multi-tenant SaaS real-time customer service system.
+
+STRICT RULES:
+1. Every database table MUST include tenant_id
+2. Every query MUST filter by tenant_id
+3. WebSocket events MUST be isolated by tenant
+4. No message should contain base64 file data
+5. All files must be uploaded first, then send URL
+6. Messages must be lightweight JSON only
+
+Backend: NestJS + Prisma + PostgreSQL
+Frontend: React + TypeScript
+Realtime: WebSocket Gateway only (no polling)
+Cache: Redis only for online/session state
+File storage: OSS or local dev storage
+
+Message format:
+- text: plain text
+- image/video/file: URL only
+NEVER:
+- send base64 in websocket
+- store file content in database
+
+Frontend must:
+- use virtual list for chat
+- lazy load images
+- paginate messages
+
+Backend must:
+- paginate message queries
+- never return full history by default
+
+WebSocket must:
+- use session_id routing
+- isolate tenant_id channels
+- send only delta updates
+
+Module priority:
+1. Prisma schema
+2. Tenant system
+3. Auth system
+4. User/Agent
+5. Session
+6. Message + WebSocket
+7. Transfer + Remark
+8. Frontend 3 apps
+9. SDK widget

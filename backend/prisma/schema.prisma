@@ -1,0 +1,349 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+enum AgentAccountStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AgentRole {
+  TENANT_ADMIN
+  SUPERVISOR
+  AGENT
+}
+
+enum AgentOnlineStatus {
+  ONLINE
+  OFFLINE
+  BUSY
+  AWAY
+}
+
+enum SessionStatus {
+  WAITING
+  ACTIVE
+  CLOSED
+}
+
+enum SessionClosedBy {
+  USER
+  AGENT
+  SYSTEM
+}
+
+enum SessionCloseReason {
+  MANUAL
+  TIMEOUT
+  DISCONNECT
+}
+
+enum MessageSenderType {
+  USER
+  AGENT
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  FILE
+}
+
+model Tenant {
+  id           String       @id @default(uuid())
+  tenantCode   String       @unique @map("tenant_code")
+  name         String
+  slug         String       @unique
+  apiKey       String       @unique @map("api_key")
+  adminEmail   String       @map("admin_email")
+  contactName  String?      @map("contact_name")
+  contactPhone String?      @map("contact_phone")
+  remark       String?
+  domain       String?
+  status       TenantStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  users       User[]
+  agents      Agent[]
+  conversations Conversation[]
+  sessions    Session[]
+  messages    Message[]
+  fileUploads FileUpload[]
+  remarks     Remark[]
+  quickReplies QuickReply[]
+  tenantSettings TenantSetting[]
+  transfers   Transfer[]
+
+  @@map("tenants")
+}
+
+model FileUpload {
+  id           String            @id @default(uuid())
+  tenantId     String            @map("tenant_id")
+  uploaderType MessageSenderType @map("uploader_type")
+  uploaderId   String?           @map("uploader_id")
+  fileName     String            @map("file_name")
+  fileSize     Int               @map("file_size")
+  mimeType     String            @map("mime_type")
+  storagePath  String            @map("storage_path")
+  url          String
+  messageId    String?           @map("message_id")
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@map("file_uploads")
+}
+
+model PlatformAdmin {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_admins")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  deviceId     String?   @map("device_id")
+  visitorNo    Int?      @map("visitor_no")
+  nickname     String?
+  originalName String?   @map("original_name")
+  metadata     Json?
+  firstSeenAt  DateTime? @map("first_seen_at")
+  lastSeenAt   DateTime? @map("last_seen_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  sessions Session[]
+  remarks  Remark[]
+  conversation Conversation?
+
+  @@unique([tenantId, deviceId])
+  @@unique([tenantId, visitorNo])
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Agent {
+  id            String              @id @default(uuid())
+  tenantId      String              @map("tenant_id")
+  email         String
+  password      String
+  name          String
+  phone         String?
+  avatar        String?
+  agentCode     String?             @map("agent_code")
+  remark        String?
+  role          AgentRole           @default(AGENT)
+  accountStatus AgentAccountStatus  @default(ACTIVE) @map("account_status")
+  status        AgentOnlineStatus   @default(OFFLINE)
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  tenant          Tenant     @relation(fields: [tenantId], references: [id])
+  sessions        Session[]
+  remarks         Remark[]
+  quickReplies    QuickReply[]
+  transfersFrom   Transfer[] @relation("TransferFrom")
+  transfersTo     Transfer[] @relation("TransferTo")
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, agentCode])
+  @@index([tenantId])
+  @@map("agents")
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  userId    String   @unique @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+  sessions Session[]
+
+  @@index([tenantId])
+  @@map("conversations")
+}
+
+model Session {
+  id               String        @id @default(uuid())
+  tenantId         String        @map("tenant_id")
+  conversationId   String        @map("conversation_id")
+  userId           String        @map("user_id")
+  agentId          String?       @map("agent_id")
+  preferredAgentId String?       @map("preferred_agent_id")
+  status           SessionStatus @default(WAITING)
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  closedAt         DateTime?     @map("closed_at")
+  closedBy         SessionClosedBy? @map("closed_by")
+  closedReason     SessionCloseReason? @map("closed_reason")
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+  agent        Agent?       @relation(fields: [agentId], references: [id])
+  messages     Message[]
+  transfers    Transfer[]
+
+  @@index([tenantId])
+  @@index([tenantId, userId])
+  @@index([tenantId, conversationId])
+  @@index([tenantId, status])
+  @@map("sessions")
+}
+
+model Message {
+  id         String            @id @default(uuid())
+  tenantId   String            @map("tenant_id")
+  sessionId  String            @map("session_id")
+  senderType MessageSenderType @map("sender_type")
+  senderId   String?           @map("sender_id")
+  type       MessageType       @default(TEXT)
+  content    String
+  fileName   String?           @map("file_name")
+  fileSize   Int?              @map("file_size")
+  metadata   Json?
+  createdAt  DateTime          @default(now()) @map("created_at")
+  readAt     DateTime?         @map("read_at")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  session Session @relation(fields: [sessionId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, sessionId])
+  @@map("messages")
+}
+
+model Remark {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  userId    String   @map("user_id")
+  agentId   String   @map("agent_id")
+  content   String
+  tags      String[] @default([])
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+  agent  Agent  @relation(fields: [agentId], references: [id])
+
+  @@unique([tenantId, userId, agentId])
+  @@index([tenantId, userId])
+  @@map("remarks")
+}
+
+model QuickReply {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  agentId   String?  @map("agent_id")
+  title     String
+  content   String
+  shortcut  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  agent  Agent? @relation(fields: [agentId], references: [id])
+
+  @@index([tenantId])
+  @@map("quick_replies")
+}
+
+model Transfer {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  sessionId   String   @map("session_id")
+  fromAgentId String   @map("from_agent_id")
+  toAgentId   String   @map("to_agent_id")
+  reason      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id])
+  session   Session @relation(fields: [sessionId], references: [id])
+  fromAgent Agent   @relation("TransferFrom", fields: [fromAgentId], references: [id])
+  toAgent   Agent   @relation("TransferTo", fields: [toAgentId], references: [id])
+
+  @@index([tenantId, sessionId])
+  @@map("transfers")
+}
+
+model OperationLog {
+  id         String   @id @default(uuid())
+  adminId    String?  @map("admin_id")
+  adminEmail String   @map("admin_email")
+  action     String
+  target     String?
+  detail     String?
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("operation_logs")
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+model TenantSetting {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  key       String
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@map("tenant_settings")
+}
+
+model LoginLog {
+  id         String   @id @default(uuid())
+  account    String
+  role       String
+  tenantCode String?  @map("tenant_code")
+  tenantName String?  @map("tenant_name")
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  success    Boolean  @default(true)
+  failReason String?  @map("fail_reason")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([account])
+  @@map("login_logs")
+}

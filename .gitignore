@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.aliyun
+backend/.env
+apps/*/.env
+!**/.env.example
+uploads/
+backend/uploads/
+*.log
+*.pem
+.DS_Store
+doc/extracted/
+deploy/jiashui.pem

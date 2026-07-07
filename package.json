@@ -1,0 +1,25 @@
+{
+  "name": "visitor-chat-hub",
+  "version": "2.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "apps/*",
+    "packages/*",
+    "sdk"
+  ],
+  "scripts": {
+    "dev:backend": "npm run start:dev -w backend",
+    "dev:user": "npm run dev -w @cs/user-web",
+    "dev:agent": "npm run dev -w @cs/agent-web",
+    "dev:admin": "npm run dev -w @cs/admin-web",
+    "dev:tenant": "npm run dev -w @cs/tenant-admin-web",
+    "dev:sdk": "npm run dev -w @cs/sdk-widget",
+    "build": "npm run build -w backend && npm run build -w @cs/user-web && npm run build -w @cs/agent-web && npm run build -w @cs/admin-web && npm run build -w @cs/tenant-admin-web",
+    "db:generate": "npm run prisma:generate -w backend",
+    "db:migrate": "npm run prisma:migrate -w backend",
+    "db:seed": "npm run prisma:seed -w backend",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  }
+}
