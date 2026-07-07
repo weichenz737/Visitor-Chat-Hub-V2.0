@@ -11,6 +11,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { QuickReplyService } from '../quick-reply/quick-reply.service';
 import { AuthPayload } from '../../common/decorators/auth.decorator';
 import { enrichMessagesWithSenderNames } from '../../common/utils/message-sender.util';
+import {
+  TENANT_AUTH_DEFAULTS,
+  TenantAuthorizationService,
+} from '../../common/services/tenant-authorization.service';
 
 function startOfToday() {
   const d = new Date();
@@ -23,6 +27,7 @@ export class TenantAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly quickReplyService: QuickReplyService,
+    private readonly tenantAuth: TenantAuthorizationService,
   ) {}
 
   private tenantSelect = {
@@ -49,6 +54,7 @@ export class TenantAdminService {
     assignmentStrategy: 'idle_first',
     agentLinkOfflineBehavior: 'wait',
     visitorTags: 'VIP,已成交,售前,售后,投诉,高意向',
+    ...TENANT_AUTH_DEFAULTS,
   };
 
   private async getTenant(tenantId: string) {
@@ -264,6 +270,54 @@ export class TenantAdminService {
     return { items: withCounts, total, page, limit };
   }
 
+  async getAuthorizations(tenantId: string) {
+    return this.tenantAuth.getAuthorizations(tenantId);
+  }
+
+  async removeVisitorSession(
+    tenantId: string,
+    userId: string,
+    operatorAgentId: string,
+  ) {
+    await this.tenantAuth.assertAllowDeleteSessions(tenantId);
+
+    const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId } });
+    if (!user) throw new NotFoundException('访客不存在');
+
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { tenantId, userId },
+    });
+    if (!conversation) throw new NotFoundException('会话不存在');
+
+    const sessions = await this.prisma.session.findMany({
+      where: { tenantId, conversationId: conversation.id, status: { not: 'REMOVED' } },
+    });
+    if (!sessions.length) throw new NotFoundException('没有可删除的会话');
+
+    const now = new Date();
+    await this.prisma.$transaction(
+      sessions.map((s) =>
+        this.prisma.session.update({
+          where: { id: s.id },
+          data: {
+            status: 'REMOVED',
+            removedAt: now,
+            removedByAgentId: operatorAgentId,
+            ...(s.status !== 'CLOSED'
+              ? {
+                  closedAt: now,
+                  closedBy: 'AGENT' as const,
+                  closedReason: 'MANUAL' as const,
+                }
+              : {}),
+          },
+        }),
+      ),
+    );
+
+    return { removed: sessions.length };
+  }
+
   async createAgent(
     tenantId: string,
     data: {
@@ -279,6 +333,7 @@ export class TenantAdminService {
     if (user.staffRole === 'SUPERVISOR' && (data as { role?: string }).role === 'TENANT_ADMIN') {
       throw new ForbiddenException('无权创建企业管理员');
     }
+    await this.tenantAuth.assertCanCreateAgent(tenantId);
     const hashed = await bcrypt.hash(data.password, 10);
     const count = await this.prisma.agent.count({ where: { tenantId } });
     const agentCode = `AG${String(count + 1).padStart(3, '0')}`;
@@ -387,7 +442,7 @@ export class TenantAdminService {
       page?: number;
       limit?: number;
       keyword?: string;
-      status?: 'ACTIVE' | 'CLOSED' | 'WAITING' | 'current';
+      status?: 'ACTIVE' | 'CLOSED' | 'WAITING' | 'REMOVED' | 'current';
     },
   ) {
     const page = query.page ?? 1;

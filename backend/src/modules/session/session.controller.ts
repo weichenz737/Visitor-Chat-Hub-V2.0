@@ -99,4 +99,17 @@ export class SessionController {
     );
     return result;
   }
+
+  @Patch(':id/remove')
+  @Roles('agent')
+  async remove(@CurrentUser() user: AuthPayload, @Param('id') id: string) {
+    const result = await this.sessionService.remove(user.tenantId!, id, user.sub);
+    const gateway = this.moduleRef.get(ChatGateway, { strict: false });
+    gateway?.notifySessionClose(
+      user.tenantId!,
+      result.session,
+      'AGENT',
+    );
+    return result;
+  }
 }

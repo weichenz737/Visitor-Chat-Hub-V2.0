@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Typography, message, Tag,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Typography, message, Tag, Alert, Tooltip,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { tenantApi } from '../api/client';
+import { useTenantAuthorizations } from '../hooks/useTenantAuthorizations';
 import { StatusTag, agentAccountStatusMap, agentRoleMap } from '../utils/status';
 import { accountRules } from '../utils/account';
 import { useChatStore } from '@cs/shared/src/store';
 
 export default function AgentsPage() {
-  const { auth } = useChatStore();
+  const { auth: storeAuth } = useChatStore();
   const [form] = Form.useForm();
   const [agentForm] = Form.useForm();
   const [pwdForm] = Form.useForm();
@@ -21,6 +22,11 @@ export default function AgentsPage() {
   const [keyword, setKeyword] = useState('');
   const [modal, setModal] = useState<{ open: boolean; editing?: Record<string, unknown> }>({ open: false });
   const [pwdModal, setPwdModal] = useState<{ open: boolean; agent?: Record<string, unknown> }>({ open: false });
+  const { auth } = useTenantAuthorizations();
+
+  const agentQuotaLabel = auth.maxAgentCount > 0
+    ? `${auth.currentAgentCount} / ${auth.maxAgentCount}`
+    : `${auth.currentAgentCount} / 不限`;
 
   const load = useCallback(async (p = page, kw = keyword) => {
     setLoading(true);
@@ -51,16 +57,35 @@ export default function AgentsPage() {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>客服管理</Typography.Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space direction="vertical" size={0}>
+          <Typography.Title level={4} style={{ margin: 0 }}>客服管理</Typography.Title>
+          <Typography.Text type="secondary">授权客服数量：{agentQuotaLabel}</Typography.Text>
+        </Space>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => load()}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-            setModal({ open: true });
-            agentForm.resetFields();
-          }}>新增客服</Button>
+          <Tooltip title={!auth.canCreateAgent ? '已达到授权客服数量上限' : undefined}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={!auth.canCreateAgent}
+              onClick={() => {
+                setModal({ open: true });
+                agentForm.resetFields();
+              }}
+            >
+              新增客服
+            </Button>
+          </Tooltip>
         </Space>
       </div>
+      {!auth.canCreateAgent && auth.maxAgentCount > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`已达到授权客服数量上限（${auth.maxAgentCount}），如需继续新增请联系平台管理员`}
+        />
+      )}
       <Card>
         <Form form={form} layout="inline" onFinish={(v) => { setKeyword(v.keyword ?? ''); setPage(1); load(1, v.keyword ?? ''); }}>
           <Form.Item name="keyword"><Input placeholder="搜索姓名/账号" prefix={<SearchOutlined />} allowClear /></Form.Item>
@@ -106,7 +131,7 @@ export default function AgentsPage() {
                     setPwdModal({ open: true, agent: record });
                     pwdForm.resetFields();
                   }}>重置密码</Button>
-                  {record.role !== 'TENANT_ADMIN' && record.id !== auth?.userId && (
+                  {record.role !== 'TENANT_ADMIN' && record.id !== storeAuth?.userId && (
                     <Popconfirm title="确认删除？" onConfirm={async () => {
                       await tenantApi.deleteAgent(record.id as string);
                       message.success('已删除');

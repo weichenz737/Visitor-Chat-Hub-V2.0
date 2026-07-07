@@ -369,7 +369,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(this.tenantRoom(tenantId)).emit('session_close', payload);
     this.server
       .to(this.roomName(tenantId, session.id))
-      .emit('session_status', { sessionId: session.id, status: 'CLOSED' });
+      .emit('session_status', { sessionId: session.id, status: session.status });
   }
 
   notifySessionAssigned(

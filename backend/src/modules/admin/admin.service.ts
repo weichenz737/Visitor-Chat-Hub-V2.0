@@ -11,6 +11,7 @@ import { OperationLogService, LogContext } from './operation-log.service';
 import { QuickReplyService } from '../quick-reply/quick-reply.service';
 import { LoginLogService } from './login-log.service';
 import { enrichMessagesWithSenderNames } from '../../common/utils/message-sender.util';
+import { TENANT_AUTH_DEFAULTS } from '../../common/services/tenant-authorization.service';
 
 function startOfToday() {
   const d = new Date();
@@ -541,6 +542,9 @@ export class AdminService {
     page?: number;
     limit?: number;
     keyword?: string;
+    tenantCode?: string;
+    agentId?: string;
+    status?: 'ONLINE' | 'OFFLINE' | 'ACTIVE' | 'SUSPENDED';
     onlineOnly?: boolean;
     suspendedOnly?: boolean;
   }) {
@@ -549,8 +553,18 @@ export class AdminService {
     const skip = (page - 1) * limit;
 
     const where: Prisma.AgentWhereInput = {};
-    if (query.onlineOnly) where.status = 'ONLINE';
-    if (query.suspendedOnly) where.accountStatus = 'SUSPENDED';
+    if (query.agentId) where.id = query.agentId;
+    if (query.tenantCode) {
+      where.tenant = { tenantCode: query.tenantCode };
+    }
+    if (query.status === 'ONLINE' || query.status === 'OFFLINE') {
+      where.status = query.status;
+    } else if (query.status === 'ACTIVE' || query.status === 'SUSPENDED') {
+      where.accountStatus = query.status;
+    } else {
+      if (query.onlineOnly) where.status = 'ONLINE';
+      if (query.suspendedOnly) where.accountStatus = 'SUSPENDED';
+    }
     if (query.keyword) {
       where.OR = [
         { name: { contains: query.keyword, mode: 'insensitive' } },
@@ -868,6 +882,7 @@ export class AdminService {
     allowedFileTypes: 'image/*,video/*,.pdf,.doc,.docx',
     sessionTimeoutMinutes: '30',
     assignmentStrategy: 'idle_first',
+    ...TENANT_AUTH_DEFAULTS,
   };
 
   async getTenantSettings(tenantCode: string) {

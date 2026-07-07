@@ -16,7 +16,6 @@ export default function TenantListPage() {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [createForm] = Form.useForm();
-  const [editForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<TenantItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -24,8 +23,6 @@ export default function TenantListPage() {
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState<string | undefined>();
   const [createOpen, setCreateOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editing, setEditing] = useState<TenantItem | null>(null);
 
   const load = useCallback(async (p = page, kw = keyword, st = status) => {
     setLoading(true);
@@ -47,27 +44,6 @@ export default function TenantListPage() {
     setCreateOpen(false);
     createForm.resetFields();
     load(1);
-  };
-
-  const handleEdit = async () => {
-    if (!editing) return;
-    const values = await editForm.validateFields();
-    await adminApi.updateTenant(editing.tenantCode, values);
-    message.success('保存成功');
-    setEditOpen(false);
-    load();
-  };
-
-  const openEdit = (record: TenantItem) => {
-    setEditing(record);
-    editForm.setFieldsValue({
-      name: record.name,
-      contactName: record.contactName,
-      contactPhone: record.contactPhone,
-      remark: record.remark,
-      status: record.status,
-    });
-    setEditOpen(true);
   };
 
   return (
@@ -138,11 +114,11 @@ export default function TenantListPage() {
             { title: '创建时间', dataIndex: 'createdAt', render: (v) => dayjs(v).format('YYYY-MM-DD HH:mm') },
             {
               title: '操作',
-              width: 280,
+              width: 220,
               render: (_, record) => (
                 <Space wrap>
                   <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.tenantCode}`)}>查看</Button>
-                  <Button type="link" size="small" onClick={() => openEdit(record)}>编辑</Button>
+                  <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.tenantCode}`)}>编辑</Button>
                   {record.status !== 'ACTIVE' && (
                     <Button type="link" size="small" onClick={async () => {
                       await adminApi.updateTenantStatus(record.tenantCode, 'ACTIVE');
@@ -157,7 +133,6 @@ export default function TenantListPage() {
                       load();
                     }}>冻结</Button>
                   )}
-                  <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.tenantCode}?tab=agents`)}>客服管理</Button>
                   <Popconfirm
                     title="确认删除该租户？"
                     description={(record._count?.agents ?? 0) > 0 ? '请先删除全部客服' : '删除后不可恢复'}
@@ -197,26 +172,6 @@ export default function TenantListPage() {
           <Form.Item name="contactName" label="联系人"><Input /></Form.Item>
           <Form.Item name="contactPhone" label="联系电话"><Input /></Form.Item>
           <Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal title="编辑租户" open={editOpen} onOk={handleEdit} onCancel={() => setEditOpen(false)} destroyOnClose>
-        <Form form={editForm} layout="vertical">
-          <Form.Item label="企业编码"><Input value={editing?.tenantCode} disabled /></Form.Item>
-          <Form.Item name="name" label="企业名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label="Slug"><Input value={editing?.slug} disabled /></Form.Item>
-          <Form.Item name="contactName" label="联系人"><Input /></Form.Item>
-          <Form.Item name="contactPhone" label="联系电话"><Input /></Form.Item>
-          <Form.Item name="remark" label="备注"><Input.TextArea rows={2} /></Form.Item>
-          <Form.Item name="status" label="状态">
-            <Select options={[
-              { value: 'ACTIVE', label: '启用' },
-              { value: 'SUSPENDED', label: '冻结' },
-              { value: 'DISABLED', label: '已停用' },
-            ]} />
-          </Form.Item>
         </Form>
       </Modal>
     </Space>

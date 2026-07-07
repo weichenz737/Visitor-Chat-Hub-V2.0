@@ -237,6 +237,7 @@ export class FileService {
       startTime?: string;
       endTime?: string;
       uploader?: string;
+      uploaderAgentId?: string;
     },
   ) {
     await this.runBackfillOnce();
@@ -270,7 +271,10 @@ export class FileService {
       if (query.endTime) where.createdAt.lte = new Date(query.endTime);
     }
 
-    if (query.uploader?.trim()) {
+    if (query.uploaderAgentId) {
+      where.uploaderType = MessageSenderType.AGENT;
+      where.uploaderId = query.uploaderAgentId;
+    } else if (query.uploader?.trim()) {
       const uploaderWhere = await this.buildUploaderFilter(
         resolvedTenantId,
         query.uploader.trim(),

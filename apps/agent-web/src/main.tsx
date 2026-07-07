@@ -453,6 +453,8 @@ function AgentWorkbench() {
 
   const [onlineAgents, setOnlineAgents] = useState<{ id: string; name: string; status?: string }[]>([]);
 
+  const [inboxTab, setInboxTab] = useState<'active' | 'archived'>('active');
+
   const listRef = useRef<HTMLDivElement>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -486,6 +488,11 @@ function AgentWorkbench() {
   useEffect(() => {
     if (auth?.agentStatus) setAgentStatus(auth.agentStatus);
   }, [auth?.agentStatus]);
+
+  useEffect(() => {
+    if (!auth) return;
+    loadConversations(inboxTab === 'archived');
+  }, [auth?.token, inboxTab]);
 
   useEffect(() => {
 
@@ -557,6 +564,44 @@ function AgentWorkbench() {
 
   };
 
+  const handleArchive = async () => {
+    if (!auth || !conversation) return;
+    if (!window.confirm('确认归档该会话？归档后可在「归档」列表中查看。')) return;
+    await apiFetch(`/conversations/${conversation.id}/archive`, {
+      method: 'PATCH',
+      token: auth.token,
+    });
+    useChatStore.setState({ conversation: null, session: null, messages: [] });
+    await loadConversations(false);
+  };
+
+  const handleUnarchive = async () => {
+    if (!auth || !conversation) return;
+    await apiFetch(`/conversations/${conversation.id}/unarchive`, {
+      method: 'PATCH',
+      token: auth.token,
+    });
+    useChatStore.setState({ conversation: null, session: null, messages: [] });
+    await loadConversations(true);
+  };
+
+  const handleRemoveConversation = async () => {
+    if (!auth || !conversation) return;
+    if (!window.confirm('确认删除该会话？删除后企业/平台后台可查看移除记录，且不可恢复。')) return;
+    const convId = conversation.id;
+    await apiFetch(`/conversations/${convId}`, {
+      method: 'DELETE',
+      token: auth.token,
+    });
+    useChatStore.setState((state) => ({
+      conversation: null,
+      session: null,
+      messages: [],
+      conversations: state.conversations.filter((c) => c.id !== convId),
+    }));
+    await loadConversations(inboxTab === 'archived');
+  };
+
 
 
   const currentSession = session ?? conversation?.currentSession ?? null;
@@ -613,7 +658,31 @@ function AgentWorkbench() {
 
         <aside className="chat-sidebar">
 
-          <div className="sidebar-header"><h2>会话列表</h2></div>
+          <div className="sidebar-header">
+            <h2>会话列表</h2>
+            <div className="inbox-tabs">
+              <button
+                type="button"
+                className={inboxTab === 'active' ? 'active' : ''}
+                onClick={() => {
+                  setInboxTab('active');
+                  useChatStore.setState({ conversation: null, session: null, messages: [] });
+                }}
+              >
+                进行中
+              </button>
+              <button
+                type="button"
+                className={inboxTab === 'archived' ? 'active' : ''}
+                onClick={() => {
+                  setInboxTab('archived');
+                  useChatStore.setState({ conversation: null, session: null, messages: [] });
+                }}
+              >
+                归档
+              </button>
+            </div>
+          </div>
 
           {conversations.map((conv) => {
 
@@ -678,20 +747,34 @@ function AgentWorkbench() {
 
               <div className="chat-toolbar">
 
+                <div className="chat-toolbar-actions">
+                  {conversation && inboxTab === 'active' && (
+                    <>
+                      <button type="button" className="toolbar-action-btn" onClick={handleArchive}>归档</button>
+                      <button type="button" className="toolbar-action-btn toolbar-action-btn--danger" onClick={handleRemoveConversation}>删除</button>
+                    </>
+                  )}
+
+                  {conversation && inboxTab === 'archived' && (
+                    <>
+                      <button type="button" className="toolbar-action-btn" onClick={handleUnarchive}>取消归档</button>
+                      <button type="button" className="toolbar-action-btn toolbar-action-btn--danger" onClick={handleRemoveConversation}>删除</button>
+                    </>
+                  )}
+
+                  {currentSession?.status === 'ACTIVE' && (
+                    <button type="button" className="toolbar-action-btn toolbar-action-btn--danger" onClick={handleCloseSession}>结束会话</button>
+                  )}
+                </div>
+
                 {(() => {
                   const visitor = formatVisitorDisplay(conversation.user);
                   return (
-                    <span>
+                    <span className="chat-toolbar-title">
                       与 {visitor.name}{visitor.originalLabel} 对话
                     </span>
                   );
                 })()}
-
-                {currentSession?.status === 'ACTIVE' && (
-
-                  <button type="button" className="end-session-btn" onClick={handleCloseSession}>结束会话</button>
-
-                )}
 
               </div>
 

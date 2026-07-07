@@ -44,7 +44,7 @@ interface ChatStore {
   sendFile: (file: File) => Promise<void>;
   loadConversationMessages: (conversationId: string, page?: number) => Promise<void>;
   loadMessages: (sessionId: string, page?: number) => Promise<void>;
-  loadConversations: () => Promise<void>;
+  loadConversations: (archived?: boolean) => Promise<void>;
   loadAgentSessions: () => Promise<void>;
   assignSession: (sessionId: string) => Promise<void>;
   selectConversation: (conversation: Conversation) => Promise<void>;
@@ -418,11 +418,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
       closedBy: 'USER' | 'AGENT' | 'SYSTEM';
       session?: Session;
     }) => {
+      const isRemoved = data.session?.status === 'REMOVED';
       set((state) => {
+        if (isRemoved) {
+          const conversations = state.conversations.filter(
+            (c) =>
+              c.id !== data.conversationId &&
+              c.currentSession?.id !== data.sessionId,
+          );
+          const conversation =
+            state.conversation?.id === data.conversationId ||
+            state.conversation?.currentSession?.id === data.sessionId
+              ? null
+              : state.conversation;
+          const session =
+            state.session?.id === data.sessionId ? null : state.session;
+          return { conversation, conversations, session };
+        }
         const closedSession = {
           ...(data.session ?? state.session ?? {}),
           id: data.sessionId,
-          status: 'CLOSED' as const,
+          status: (data.session?.status ?? 'CLOSED') as Session['status'],
           closedBy: data.closedBy,
         };
         const conversation = state.conversation
@@ -626,11 +642,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
     set({ messages: data.items });
   },
 
-  loadConversations: async () => {
+  loadConversations: async (archived = false) => {
     const { auth } = get();
     if (!auth) return;
+    const q = archived ? '&archived=1' : '';
     const data = await apiFetch<{ items: Conversation[] }>(
-      '/conversations/agent?page=1&limit=50',
+      `/conversations/agent?page=1&limit=50${q}`,
       { token: auth.token },
     );
     set((state) => ({

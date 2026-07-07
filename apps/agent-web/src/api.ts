@@ -53,6 +53,7 @@ export const SESSION_STATUS_LABELS: Record<string, string> = {
   WAITING: '等待中',
   ACTIVE: '进行中',
   CLOSED: '已结束',
+  REMOVED: '已移除',
 };
 
 export function agentApi(token: string) {

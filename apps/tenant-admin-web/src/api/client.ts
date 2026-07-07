@@ -166,4 +166,17 @@ export const tenantApi = {
 
   deleteQuickReply: (id: string) =>
     request(`/tenant-admin/quick-replies/${id}`, { method: 'DELETE' }),
+
+  authorizations: () =>
+    request<{
+      allowDeleteMessages: boolean;
+      allowDeleteSessions: boolean;
+      allowDeleteFiles: boolean;
+      maxAgentCount: number;
+      currentAgentCount: number;
+      canCreateAgent: boolean;
+    }>('/tenant-admin/authorizations'),
+
+  removeVisitorSession: (userId: string) =>
+    request<{ removed: number }>(`/tenant-admin/chat-users/${userId}/session`, { method: 'DELETE' }),
 };

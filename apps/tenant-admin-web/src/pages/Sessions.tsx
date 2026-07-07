@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import { tenantApi } from '../api/client';
 import ChatMessagesDrawer, { type ChatUserRef } from '../components/ChatMessagesDrawer';
+import { useTenantAuthorizations } from '../hooks/useTenantAuthorizations';
 import { StatusTag, sessionStatusMap } from '../utils/status';
 
 interface AgentOption {
@@ -24,6 +25,8 @@ interface ChatUser extends ChatUserRef {
   latestSessionAgentId?: string | null;
   latestAgentName?: string | null;
   agentNames?: string | null;
+  removedAt?: string | null;
+  removedByName?: string | null;
 }
 
 interface FilterValues {
@@ -44,6 +47,7 @@ export default function SessionsPage() {
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [transferTargets, setTransferTargets] = useState<Record<string, string>>({});
   const [transferringId, setTransferringId] = useState<string | null>(null);
+  const { auth } = useTenantAuthorizations();
 
   useEffect(() => {
     tenantApi.agents({ page: 1, limit: 200, role: 'AGENT' }).then((res) => {
@@ -123,6 +127,13 @@ export default function SessionsPage() {
     load();
   };
 
+  const removeVisitorSession = async (userId: string) => {
+    const res = await tenantApi.removeVisitorSession(userId);
+    message.success(`已删除 ${res.removed} 个会话`);
+    closeDrawer();
+    load();
+  };
+
   const transferSession = async (row: ChatUser) => {
     if (!row.latestSessionId) {
       message.warning('暂无可转接的会话');
@@ -154,7 +165,9 @@ export default function SessionsPage() {
   };
 
   const canTransfer = (row: ChatUser) =>
-    !!row.latestSessionId && row.latestSessionStatus !== 'CLOSED';
+    !!row.latestSessionId
+    && row.latestSessionStatus !== 'CLOSED'
+    && row.latestSessionStatus !== 'REMOVED';
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -185,6 +198,7 @@ export default function SessionsPage() {
                 { value: 'WAITING', label: sessionStatusMap.WAITING.label },
                 { value: 'ACTIVE', label: sessionStatusMap.ACTIVE.label },
                 { value: 'CLOSED', label: sessionStatusMap.CLOSED.label },
+                { value: 'REMOVED', label: sessionStatusMap.REMOVED.label },
               ]}
             />
           </Form.Item>
@@ -253,6 +267,21 @@ export default function SessionsPage() {
               render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-',
             },
             {
+              title: '移除人',
+              dataIndex: 'removedByName',
+              width: 100,
+              render: (v: string, r) => r.latestSessionStatus === 'REMOVED' ? (v || '-') : '-',
+            },
+            {
+              title: '移除时间',
+              dataIndex: 'removedAt',
+              width: 170,
+              render: (v: string, r) =>
+                r.latestSessionStatus === 'REMOVED' && v
+                  ? dayjs(v).format('YYYY-MM-DD HH:mm:ss')
+                  : '-',
+            },
+            {
               title: '转接客服',
               width: 220,
               render: (_, r) => {
@@ -283,17 +312,27 @@ export default function SessionsPage() {
             },
             {
               title: '操作',
-              width: 180,
+              width: 220,
               fixed: 'right',
               render: (_, r) => (
-                <Space>
+                <Space wrap>
                   <Button type="link" onClick={() => openMessages(r)}>查看聊天记录</Button>
-                  <Popconfirm
-                    title="确定清空该用户所有聊天记录？"
-                    onConfirm={() => deleteAllMessages(r.id)}
-                  >
-                    <Button type="link" danger icon={<DeleteOutlined />}>清空</Button>
-                  </Popconfirm>
+                  {auth.allowDeleteMessages && (
+                    <Popconfirm
+                      title="确定清空该用户所有聊天记录？"
+                      onConfirm={() => deleteAllMessages(r.id)}
+                    >
+                      <Button type="link" danger icon={<DeleteOutlined />}>清空记录</Button>
+                    </Popconfirm>
+                  )}
+                  {auth.allowDeleteSessions && r.latestSessionStatus !== 'REMOVED' && (
+                    <Popconfirm
+                      title="确定删除该访客会话？删除后不可恢复"
+                      onConfirm={() => removeVisitorSession(r.id)}
+                    >
+                      <Button type="link" danger>删除会话</Button>
+                    </Popconfirm>
+                  )}
                 </Space>
               ),
             },
@@ -306,6 +345,7 @@ export default function SessionsPage() {
         user={drawerUser}
         onClose={closeDrawer}
         onChanged={() => load()}
+        allowDeleteMessages={auth.allowDeleteMessages}
       />
     </Space>
   );

@@ -304,6 +304,9 @@ export class AdminController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('keyword') keyword?: string,
+    @Query('tenantCode') tenantCode?: string,
+    @Query('agentId') agentId?: string,
+    @Query('status') status?: 'ONLINE' | 'OFFLINE' | 'ACTIVE' | 'SUSPENDED',
     @Query('onlineOnly') onlineOnly?: string,
     @Query('suspendedOnly') suspendedOnly?: string,
   ) {
@@ -311,6 +314,9 @@ export class AdminController {
       page: page ? +page : 1,
       limit: limit ? +limit : 20,
       keyword,
+      tenantCode,
+      agentId,
+      status,
       onlineOnly: onlineOnly === 'true',
       suspendedOnly: suspendedOnly === 'true',
     });
@@ -352,12 +358,18 @@ export class AdminController {
     @Query('limit') limit?: string,
     @Query('keyword') keyword?: string,
     @Query('tenantCode') tenantCode?: string,
+    @Query('sessionStatus') sessionStatus?: string,
+    @Query('agentKeyword') agentKeyword?: string,
+    @Query('agentId') agentId?: string,
   ) {
     return this.chatAdminService.listChatUsers(undefined, {
       page: page ? +page : 1,
       limit: limit ? +limit : 20,
       keyword,
       tenantCode,
+      sessionStatus,
+      agentKeyword,
+      agentId,
     });
   }
 
@@ -443,6 +455,7 @@ export class AdminController {
     @Query('startTime') startTime?: string,
     @Query('endTime') endTime?: string,
     @Query('uploader') uploader?: string,
+    @Query('uploaderAgentId') uploaderAgentId?: string,
   ) {
     return this.fileService.list(undefined, {
       page: page ? +page : 1,
@@ -453,6 +466,7 @@ export class AdminController {
       startTime,
       endTime,
       uploader,
+      uploaderAgentId,
     });
   }
 

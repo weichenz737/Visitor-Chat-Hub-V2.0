@@ -22,16 +22,7 @@ const { Header, Sider, Content } = Layout;
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
   { key: '/tenants', icon: <TeamOutlined />, label: '租户管理' },
-  {
-    key: 'agents-group',
-    icon: <CustomerServiceOutlined />,
-    label: '客服管理',
-    children: [
-      { key: '/agents', label: '全部客服' },
-      { key: '/agents/online', label: '在线客服' },
-      { key: '/agents/suspended', label: '冻结客服' },
-    ],
-  },
+  { key: '/agents', icon: <CustomerServiceOutlined />, label: '客服管理' },
   { key: '/sessions', icon: <MessageOutlined />, label: '会话管理' },
   { key: '/files', icon: <FolderOutlined />, label: '文件管理' },
   { key: '/logs', icon: <FileTextOutlined />, label: '操作日志' },
@@ -46,8 +37,7 @@ export default function AdminLayout() {
   const { auth, logout } = useChatStore();
   const { token } = theme.useToken();
 
-  const selectedKey = location.pathname;
-  const openKeys = selectedKey.startsWith('/agents') ? ['agents-group'] : [];
+  const selectedKey = location.pathname.startsWith('/agents') ? '/agents' : location.pathname;
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -75,11 +65,8 @@ export default function AdminLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={[selectedKey]}
-          defaultOpenKeys={openKeys}
           items={menuItems}
-          onClick={({ key }) => {
-            if (!key.endsWith('-group')) navigate(key);
-          }}
+          onClick={({ key }) => navigate(key)}
         />
       </Sider>
       <Layout>

@@ -52,8 +52,8 @@ export default function App() {
               <Route path="tenants" element={<TenantListPage />} />
               <Route path="tenants/:tenantCode" element={<TenantDetailPage />} />
               <Route path="agents" element={<AgentListPage />} />
-              <Route path="agents/online" element={<AgentListPage />} />
-              <Route path="agents/suspended" element={<AgentListPage />} />
+              <Route path="agents/online" element={<Navigate to="/agents" replace />} />
+              <Route path="agents/suspended" element={<Navigate to="/agents" replace />} />
               <Route path="sessions" element={<SessionListPage />} />
               <Route path="sessions/current" element={<Navigate to="/sessions" replace />} />
               <Route path="sessions/closed" element={<Navigate to="/sessions" replace />} />

@@ -73,31 +73,57 @@ export class ConversationService {
     return { ...conversation, currentSession };
   }
 
-  async listForAgent(tenantId: string, agentId: string, query: PaginationDto) {
-    const { take, skip } = paginate(query.page, query.limit);
+  async getLatestSession(conversationId: string) {
+    return this.prisma.session.findFirst({
+      where: { conversationId },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        agent: { select: { id: true, name: true } },
+        removedBy: { select: { id: true, name: true } },
+      },
+    });
+  }
 
-    const conversations = await this.prisma.conversation.findMany({
-      where: {
-        tenantId,
-        sessions: {
-          some: {
-            OR: [
-              { agentId },
-              {
-                status: 'WAITING',
-                agentId: null,
-                OR: [
-                  { preferredAgentId: null },
-                  { preferredAgentId: agentId },
-                ],
-              },
-            ],
-          },
+  async listForAgent(
+    tenantId: string,
+    agentId: string,
+    query: PaginationDto & { archived?: string },
+  ) {
+    const { take, skip } = paginate(query.page, query.limit);
+    const showArchived = query.archived === '1' || query.archived === 'true';
+
+    const agentAccessFilter = {
+      OR: [
+        { agentId },
+        {
+          status: 'WAITING' as const,
+          agentId: null,
+          OR: [
+            { preferredAgentId: null },
+            { preferredAgentId: agentId },
+          ],
+        },
+      ],
+    };
+
+    const where = {
+      tenantId,
+      sessions: {
+        some: {
+          status: { not: 'REMOVED' as const },
+          ...agentAccessFilter,
         },
       },
+      ...(showArchived
+        ? { agentArchives: { some: { agentId } } }
+        : { agentArchives: { none: { agentId } } }),
+    };
+    const conversations = await this.prisma.conversation.findMany({
+      where,
       include: {
         user: { select: { id: true, nickname: true, originalName: true } },
         sessions: {
+          where: { status: { not: 'REMOVED' } },
           orderBy: { updatedAt: 'desc' },
           include: {
             agent: { select: { id: true, name: true } },
@@ -110,26 +136,7 @@ export class ConversationService {
       skip,
     });
 
-    const total = await this.prisma.conversation.count({
-      where: {
-        tenantId,
-        sessions: {
-          some: {
-            OR: [
-              { agentId },
-              {
-                status: 'WAITING',
-                agentId: null,
-                OR: [
-                  { preferredAgentId: null },
-                  { preferredAgentId: agentId },
-                ],
-              },
-            ],
-          },
-        },
-      },
-    });
+    const total = await this.prisma.conversation.count({ where });
 
     const sessionToConversation = new Map<string, string>();
     for (const conv of conversations) {
@@ -243,5 +250,83 @@ export class ConversationService {
       data: { readAt: new Date() },
     });
     return { updated: result.count };
+  }
+
+  async archive(tenantId: string, conversationId: string, agentId: string) {
+    await this.assertAgentAccess(tenantId, conversationId, agentId);
+    await this.prisma.conversationAgentArchive.upsert({
+      where: {
+        agentId_conversationId: { agentId, conversationId },
+      },
+      create: { tenantId, agentId, conversationId },
+      update: { archivedAt: new Date() },
+    });
+    return { success: true };
+  }
+
+  async unarchive(tenantId: string, conversationId: string, agentId: string) {
+    await this.assertAgentAccess(tenantId, conversationId, agentId);
+    await this.prisma.conversationAgentArchive.deleteMany({
+      where: { tenantId, agentId, conversationId },
+    });
+    return { success: true };
+  }
+
+  async removeConversation(
+    tenantId: string,
+    conversationId: string,
+    agentId: string,
+  ) {
+    await this.assertAgentAccess(tenantId, conversationId, agentId);
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        tenantId,
+        conversationId,
+        status: { not: 'REMOVED' },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (!sessions.length) {
+      throw new NotFoundException('没有可移除的会话');
+    }
+
+    await this.prisma.conversationAgentArchive.deleteMany({
+      where: { tenantId, agentId, conversationId },
+    });
+
+    const now = new Date();
+    await this.prisma.$transaction(
+      sessions.map((s) =>
+        this.prisma.session.update({
+          where: { id: s.id },
+          data: {
+            status: 'REMOVED',
+            removedAt: now,
+            removedByAgentId: agentId,
+            ...(s.status !== 'CLOSED'
+              ? {
+                  closedAt: now,
+                  closedBy: 'AGENT' as const,
+                  closedReason: 'MANUAL' as const,
+                }
+              : {}),
+          },
+        }),
+      ),
+    );
+
+    const latest = await this.prisma.session.findFirst({
+      where: { conversationId, tenantId },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        user: { select: { id: true, nickname: true } },
+        agent: { select: { id: true, name: true } },
+        removedBy: { select: { id: true, name: true } },
+      },
+    });
+    if (!latest) {
+      throw new NotFoundException('没有可移除的会话');
+    }
+    return { session: latest };
   }
 }

@@ -157,7 +157,7 @@ export class SessionService {
     senderType: 'USER' | 'AGENT' | 'SYSTEM',
   ) {
     const session = await this.findById(tenantId, sessionId);
-    if (session.status !== 'CLOSED') return session;
+    if (session.status !== 'CLOSED' && session.status !== 'REMOVED') return session;
 
     if (senderType !== 'USER') {
       throw new BadRequestException('会话已结束，无法发送消息');
@@ -235,6 +235,9 @@ export class SessionService {
     if (session.status === 'CLOSED') {
       throw new BadRequestException('会话已结束');
     }
+    if (session.status === 'REMOVED') {
+      throw new BadRequestException('会话已移除');
+    }
     await this.agentService.findById(tenantId, agentId);
 
     return this.prisma.session.update({
@@ -277,6 +280,9 @@ export class SessionService {
     if (session.status === 'CLOSED') {
       throw new BadRequestException('会话已结束');
     }
+    if (session.status === 'REMOVED') {
+      throw new BadRequestException('会话已移除');
+    }
 
     if (options.closedBy === 'USER') {
       if (session.userId !== options.actorId) {
@@ -305,6 +311,70 @@ export class SessionService {
 
     await this.touchConversation(session.conversationId);
 
+    return { session: updated };
+  }
+
+  async remove(
+    tenantId: string,
+    sessionId: string,
+    agentId: string,
+  ) {
+    const session = await this.findById(tenantId, sessionId);
+    if (session.status === 'REMOVED') {
+      throw new BadRequestException('会话已移除');
+    }
+
+    const accessible = await this.prisma.session.findFirst({
+      where: {
+        id: sessionId,
+        tenantId,
+        OR: [
+          { agentId },
+          {
+            status: 'WAITING',
+            agentId: null,
+            OR: [
+              { preferredAgentId: null },
+              { preferredAgentId: agentId },
+            ],
+          },
+        ],
+      },
+    });
+    if (!accessible) {
+      throw new ForbiddenException('无权移除此会话');
+    }
+
+    const now = new Date();
+    const data: {
+      status: 'REMOVED';
+      removedAt: Date;
+      removedByAgentId: string;
+      closedAt?: Date;
+      closedBy?: 'AGENT';
+      closedReason?: 'MANUAL';
+    } = {
+      status: 'REMOVED',
+      removedAt: now,
+      removedByAgentId: agentId,
+    };
+    if (session.status !== 'CLOSED') {
+      data.closedAt = now;
+      data.closedBy = 'AGENT';
+      data.closedReason = 'MANUAL';
+    }
+
+    const updated = await this.prisma.session.update({
+      where: { id: sessionId },
+      data,
+      include: {
+        user: { select: { id: true, nickname: true } },
+        agent: { select: { id: true, name: true } },
+        removedBy: { select: { id: true, name: true } },
+      },
+    });
+
+    await this.touchConversation(session.conversationId);
     return { session: updated };
   }
 
