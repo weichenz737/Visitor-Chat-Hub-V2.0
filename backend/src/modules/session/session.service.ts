@@ -251,9 +251,28 @@ export class SessionService {
   }
 
   async autoAssign(tenantId: string, sessionId: string) {
+    const session = await this.findById(tenantId, sessionId);
+    if (session.status !== 'WAITING' || session.agentId) {
+      return session;
+    }
+
+    if (session.preferredAgentId) {
+      const behavior = await this.getOfflineBehavior(tenantId);
+      const preferred = await this.agentService.findById(
+        tenantId,
+        session.preferredAgentId,
+      );
+      if (behavior === 'wait') {
+        if (preferred.status === 'ONLINE') {
+          return this.assignAgent(tenantId, sessionId, session.preferredAgentId);
+        }
+        return session;
+      }
+    }
+
     const onlineAgents = await this.agentService.getOnlineAgents(tenantId);
     const available = onlineAgents.filter((a) => a.status === 'ONLINE');
-    if (!available.length) return this.findById(tenantId, sessionId);
+    if (!available.length) return session;
 
     const loads = await Promise.all(
       available.map(async (agent) => {
@@ -265,6 +284,30 @@ export class SessionService {
     );
     loads.sort((a, b) => a.count - b.count);
     return this.assignAgent(tenantId, sessionId, loads[0].agent.id);
+  }
+
+  async assignPreferredWaitingSessions(tenantId: string, agentId: string) {
+    const behavior = await this.getOfflineBehavior(tenantId);
+    if (behavior !== 'wait') return [];
+
+    const agent = await this.agentService.findById(tenantId, agentId);
+    if (agent.status !== 'ONLINE') return [];
+
+    const waiting = await this.prisma.session.findMany({
+      where: {
+        tenantId,
+        status: 'WAITING',
+        agentId: null,
+        preferredAgentId: agentId,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const assigned: Awaited<ReturnType<SessionService['assignAgent']>>[] = [];
+    for (const item of waiting) {
+      assigned.push(await this.assignAgent(tenantId, item.id, agentId));
+    }
+    return assigned;
   }
 
   async close(

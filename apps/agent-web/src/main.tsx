@@ -451,6 +451,8 @@ function AgentWorkbench() {
 
   const [transferAgentId, setTransferAgentId] = useState('');
 
+  const [allowAgentTransfer, setAllowAgentTransfer] = useState(true);
+
   const [onlineAgents, setOnlineAgents] = useState<{ id: string; name: string; status?: string }[]>([]);
 
   const [inboxTab, setInboxTab] = useState<'active' | 'archived'>('active');
@@ -481,6 +483,20 @@ function AgentWorkbench() {
 
 
 
+  const loadAuthorizations = () => {
+
+    if (!auth) return;
+
+    apiFetch<{ allowAgentTransfer: boolean }>('/agents/me/authorizations', { token: auth.token })
+
+      .then((res) => setAllowAgentTransfer(res.allowAgentTransfer))
+
+      .catch(() => setAllowAgentTransfer(false));
+
+  };
+
+
+
   const transferableAgents = onlineAgents.filter((a) => a.id !== auth?.userId);
 
 
@@ -501,6 +517,8 @@ function AgentWorkbench() {
     if (auth) {
 
       loadQuickReplies();
+
+      loadAuthorizations();
 
       if (auth.name) setAgentName(auth.name);
 
@@ -830,6 +848,10 @@ function AgentWorkbench() {
 
           {auth && <QuickReplyManager auth={{ token: auth.token, userId: auth.userId }} quickReplies={quickReplies} onChange={loadQuickReplies} />}
 
+          {allowAgentTransfer && (
+
+          <>
+
           <h3 style={{ marginTop: 16 }}>转接</h3>
 
           <p className="transfer-hint">
@@ -879,6 +901,10 @@ function AgentWorkbench() {
             style={{ marginTop: 8, width: '100%' }}
 
           >转接会话</button>
+
+          </>
+
+          )}
 
         </aside>
 

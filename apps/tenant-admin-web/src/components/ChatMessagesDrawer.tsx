@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Button, DatePicker, Drawer, Form, Input, Pagination, Popconfirm, Select, Space, Spin, message,
+  Button, DatePicker, Drawer, Form, Input, Modal, Pagination, Popconfirm, Select, Space, Spin, message,
 } from 'antd';
 import { type Dayjs } from 'dayjs';
 import { ChatTranscript, type TranscriptMessage } from '@cs/shared';
@@ -42,6 +42,7 @@ interface ChatMessagesDrawerProps {
   onClose: () => void;
   onChanged?: () => void;
   allowDeleteMessages?: boolean;
+  allowEditMessages?: boolean;
 }
 
 export default function ChatMessagesDrawer({
@@ -50,6 +51,7 @@ export default function ChatMessagesDrawer({
   onClose,
   onChanged,
   allowDeleteMessages = false,
+  allowEditMessages = false,
 }: ChatMessagesDrawerProps) {
   const [form] = Form.useForm();
   const listRef = useRef<HTMLDivElement>(null);
@@ -58,6 +60,9 @@ export default function ChatMessagesDrawer({
   const [msgPage, setMsgPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<MessageFilters>({});
+  const [editForm] = Form.useForm();
+  const [editing, setEditing] = useState<TranscriptMessage | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const loadMessages = useCallback(async (
     target: ChatUserRef,
@@ -116,6 +121,39 @@ export default function ChatMessagesDrawer({
     message.success('消息已删除');
     if (user) loadMessages(user, msgPage, filters);
     onChanged?.();
+  };
+
+  const openEdit = (msg: TranscriptMessage) => {
+    setEditing(msg);
+    editForm.setFieldsValue({
+      content: msg.content,
+      fileName: msg.fileName ?? '',
+    });
+  };
+
+  const submitEdit = async () => {
+    if (!editing) return;
+    const values = await editForm.validateFields();
+    setSaving(true);
+    try {
+      const payload: { content?: string; fileName?: string } = {};
+      if (editing.type === 'TEXT' || editing.type === 'SYSTEM') {
+        payload.content = values.content;
+      } else if (editing.type === 'FILE') {
+        payload.content = values.content;
+        payload.fileName = values.fileName;
+      } else {
+        payload.content = values.content;
+      }
+      await tenantApi.updateMessage(editing.id, payload);
+      message.success('消息已更新');
+      setEditing(null);
+      editForm.resetFields();
+      if (user) loadMessages(user, msgPage, filters);
+      onChanged?.();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const deleteAllMessages = async () => {
@@ -178,6 +216,7 @@ export default function ChatMessagesDrawer({
             <ChatTranscript
               messages={messages}
               onDelete={allowDeleteMessages ? deleteMessage : undefined}
+              onEdit={allowEditMessages ? openEdit : undefined}
             />
           )}
         </div>
@@ -196,6 +235,54 @@ export default function ChatMessagesDrawer({
           </div>
         )}
       </div>
+
+      <Modal
+        title="编辑消息"
+        open={!!editing}
+        onCancel={() => { setEditing(null); editForm.resetFields(); }}
+        onOk={submitEdit}
+        confirmLoading={saving}
+        destroyOnClose
+      >
+        <Form form={editForm} layout="vertical">
+          {(editing?.type === 'TEXT' || editing?.type === 'SYSTEM') && (
+            <Form.Item
+              name="content"
+              label="消息内容"
+              rules={[{ required: true, message: '请输入消息内容' }]}
+            >
+              <Input.TextArea rows={4} maxLength={2000} showCount />
+            </Form.Item>
+          )}
+          {editing?.type === 'FILE' && (
+            <>
+              <Form.Item
+                name="fileName"
+                label="文件名称"
+                rules={[{ required: true, message: '请输入文件名称' }]}
+              >
+                <Input maxLength={255} />
+              </Form.Item>
+              <Form.Item
+                name="content"
+                label="文件链接"
+                rules={[{ required: true, message: '请输入文件链接' }]}
+              >
+                <Input maxLength={2000} />
+              </Form.Item>
+            </>
+          )}
+          {(editing?.type === 'IMAGE' || editing?.type === 'VIDEO') && (
+            <Form.Item
+              name="content"
+              label={editing.type === 'IMAGE' ? '图片链接' : '视频链接'}
+              rules={[{ required: true, message: '请输入链接' }]}
+            >
+              <Input maxLength={2000} />
+            </Form.Item>
+          )}
+        </Form>
+      </Modal>
     </Drawer>
   );
 }

@@ -281,10 +281,10 @@ export default function SessionsPage() {
                   ? dayjs(v).format('YYYY-MM-DD HH:mm:ss')
                   : '-',
             },
-            {
+            ...(auth.allowAdminTransfer ? [{
               title: '转接客服',
               width: 220,
-              render: (_, r) => {
+              render: (_: unknown, r: ChatUser) => {
                 if (!canTransfer(r)) return '-';
                 return (
                   <Space.Compact style={{ width: '100%' }}>
@@ -309,7 +309,7 @@ export default function SessionsPage() {
                   </Space.Compact>
                 );
               },
-            },
+            }] : []),
             {
               title: '操作',
               width: 220,
@@ -346,6 +346,7 @@ export default function SessionsPage() {
         onClose={closeDrawer}
         onChanged={() => load()}
         allowDeleteMessages={auth.allowDeleteMessages}
+        allowEditMessages={auth.allowEditMessages}
       />
     </Space>
   );

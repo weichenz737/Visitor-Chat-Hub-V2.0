@@ -5,6 +5,9 @@ export interface TenantAuthorizations {
   allowDeleteMessages: boolean;
   allowDeleteSessions: boolean;
   allowDeleteFiles: boolean;
+  allowEditMessages: boolean;
+  allowAdminTransfer: boolean;
+  allowAgentTransfer: boolean;
   maxAgentCount: number;
   currentAgentCount: number;
   canCreateAgent: boolean;
@@ -14,6 +17,9 @@ const defaultAuth: TenantAuthorizations = {
   allowDeleteMessages: true,
   allowDeleteSessions: true,
   allowDeleteFiles: true,
+  allowEditMessages: true,
+  allowAdminTransfer: true,
+  allowAgentTransfer: true,
   maxAgentCount: 0,
   currentAgentCount: 0,
   canCreateAgent: true,

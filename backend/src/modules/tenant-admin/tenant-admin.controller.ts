@@ -221,6 +221,16 @@ export class TenantAdminController {
     return this.chatAdminService.deleteMessage(user.tenantId!, id);
   }
 
+  @Patch('messages/:id')
+  async updateMessage(
+    @CurrentUser() user: AuthPayload,
+    @Param('id') id: string,
+    @Body() body: { content?: string; fileName?: string },
+  ) {
+    await this.tenantAuth.assertAllowEditMessages(user.tenantId!);
+    return this.chatAdminService.updateMessage(user.tenantId!, id, body);
+  }
+
   @Delete('chat-users/:userId/messages')
   async deleteChatUserMessages(
     @CurrentUser() user: AuthPayload,
@@ -248,6 +258,7 @@ export class TenantAdminController {
     @Param('id') sessionId: string,
     @Body() body: { toAgentId: string; reason?: string },
   ) {
+    await this.tenantAuth.assertAllowAdminTransfer(user.tenantId!);
     const result = await this.transferService.adminTransfer(
       user.tenantId!,
       sessionId,

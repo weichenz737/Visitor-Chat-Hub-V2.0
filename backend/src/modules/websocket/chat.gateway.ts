@@ -14,6 +14,7 @@ import { SessionService } from '../session/session.service';
 import { ConversationService } from '../conversation/conversation.service';
 import { TransferService } from '../transfer/transfer.service';
 import { AgentService } from '../agent/agent.service';
+import { TenantAuthorizationService } from '../../common/services/tenant-authorization.service';
 import { RedisService } from '../../redis/redis.service';
 import { AuthPayload } from '../../common/decorators/auth.decorator';
 import { MessageType } from '@prisma/client';
@@ -37,6 +38,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly conversationService: ConversationService,
     private readonly transferService: TransferService,
     private readonly agentService: AgentService,
+    private readonly tenantAuth: TenantAuthorizationService,
     private readonly redis: RedisService,
   ) {}
 
@@ -174,6 +176,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.registerAgentConnection(user.tenantId!, user.sub, socket.id);
     socket.join(this.tenantRoom(user.tenantId!));
 
+    const assignedSessions = await this.sessionService.assignPreferredWaitingSessions(
+      user.tenantId!,
+      user.sub,
+    );
+    for (const session of assignedSessions) {
+      const payload = {
+        sessionId: session.id,
+        agent: session.agent,
+        status: 'ACTIVE' as const,
+      };
+      this.server
+        .to(this.tenantRoom(user.tenantId!))
+        .emit('session_assigned', payload);
+      this.server
+        .to(this.roomName(user.tenantId!, session.id))
+        .emit('session_assigned', payload);
+      this.server.to(this.roomName(user.tenantId!, session.id)).emit(
+        'session_status',
+        { sessionId: session.id, status: 'ACTIVE' },
+      );
+    }
+
     const conversations = await this.conversationService.listForAgent(
       user.tenantId!,
       user.sub,
@@ -275,6 +299,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const user = socket.data.user as WsAuthPayload;
     if (user.role !== 'agent') return { error: 'Unauthorized' };
+
+    await this.tenantAuth.assertAllowAgentTransfer(user.tenantId!);
 
     const result = await this.transferService.transfer(
       user.tenantId!,

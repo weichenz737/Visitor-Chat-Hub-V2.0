@@ -5,6 +5,9 @@ export const TENANT_AUTH_KEYS = {
   allowDeleteMessages: 'allowDeleteMessages',
   allowDeleteSessions: 'allowDeleteSessions',
   allowDeleteFiles: 'allowDeleteFiles',
+  allowEditMessages: 'allowEditMessages',
+  allowAdminTransfer: 'allowAdminTransfer',
+  allowAgentTransfer: 'allowAgentTransfer',
   maxAgentCount: 'maxAgentCount',
 } as const;
 
@@ -12,6 +15,9 @@ export const TENANT_AUTH_DEFAULTS: Record<string, string> = {
   [TENANT_AUTH_KEYS.allowDeleteMessages]: 'true',
   [TENANT_AUTH_KEYS.allowDeleteSessions]: 'true',
   [TENANT_AUTH_KEYS.allowDeleteFiles]: 'true',
+  [TENANT_AUTH_KEYS.allowEditMessages]: 'true',
+  [TENANT_AUTH_KEYS.allowAdminTransfer]: 'true',
+  [TENANT_AUTH_KEYS.allowAgentTransfer]: 'true',
   [TENANT_AUTH_KEYS.maxAgentCount]: '0',
 };
 
@@ -19,6 +25,9 @@ export interface TenantAuthorizations {
   allowDeleteMessages: boolean;
   allowDeleteSessions: boolean;
   allowDeleteFiles: boolean;
+  allowEditMessages: boolean;
+  allowAdminTransfer: boolean;
+  allowAgentTransfer: boolean;
   maxAgentCount: number;
   currentAgentCount: number;
   canCreateAgent: boolean;
@@ -68,6 +77,18 @@ export class TenantAuthorizationService {
         map[TENANT_AUTH_KEYS.allowDeleteFiles],
         true,
       ),
+      allowEditMessages: this.parseBool(
+        map[TENANT_AUTH_KEYS.allowEditMessages],
+        true,
+      ),
+      allowAdminTransfer: this.parseBool(
+        map[TENANT_AUTH_KEYS.allowAdminTransfer],
+        true,
+      ),
+      allowAgentTransfer: this.parseBool(
+        map[TENANT_AUTH_KEYS.allowAgentTransfer],
+        true,
+      ),
       maxAgentCount,
       currentAgentCount,
       canCreateAgent,
@@ -92,6 +113,27 @@ export class TenantAuthorizationService {
     const auth = await this.getAuthorizations(tenantId);
     if (!auth.allowDeleteFiles) {
       throw new ForbiddenException('未授权删除文件');
+    }
+  }
+
+  async assertAllowEditMessages(tenantId: string) {
+    const auth = await this.getAuthorizations(tenantId);
+    if (!auth.allowEditMessages) {
+      throw new ForbiddenException('未授权编辑聊天记录');
+    }
+  }
+
+  async assertAllowAdminTransfer(tenantId: string) {
+    const auth = await this.getAuthorizations(tenantId);
+    if (!auth.allowAdminTransfer) {
+      throw new ForbiddenException('未授权企业后台转接客服');
+    }
+  }
+
+  async assertAllowAgentTransfer(tenantId: string) {
+    const auth = await this.getAuthorizations(tenantId);
+    if (!auth.allowAgentTransfer) {
+      throw new ForbiddenException('未授权客服转接');
     }
   }
 

@@ -60,6 +60,9 @@ export default function TenantDetailPage() {
         allowDeleteMessages,
         allowDeleteSessions,
         allowDeleteFiles,
+        allowEditMessages,
+        allowAdminTransfer,
+        allowAgentTransfer,
         maxAgentCount,
         ...brandSettings
       } = ts as Record<string, string>;
@@ -68,6 +71,9 @@ export default function TenantDetailPage() {
         allowDeleteMessages: allowDeleteMessages !== 'false',
         allowDeleteSessions: allowDeleteSessions !== 'false',
         allowDeleteFiles: allowDeleteFiles !== 'false',
+        allowEditMessages: allowEditMessages !== 'false',
+        allowAdminTransfer: allowAdminTransfer !== 'false',
+        allowAgentTransfer: allowAgentTransfer !== 'false',
         maxAgentCount: Number(maxAgentCount) || 0,
       });
       setQuickReplies(qr);
@@ -91,6 +97,9 @@ export default function TenantDetailPage() {
       allowDeleteMessages: values.allowDeleteMessages ? 'true' : 'false',
       allowDeleteSessions: values.allowDeleteSessions ? 'true' : 'false',
       allowDeleteFiles: values.allowDeleteFiles ? 'true' : 'false',
+      allowEditMessages: values.allowEditMessages ? 'true' : 'false',
+      allowAdminTransfer: values.allowAdminTransfer ? 'true' : 'false',
+      allowAgentTransfer: values.allowAgentTransfer ? 'true' : 'false',
       maxAgentCount: String(values.maxAgentCount ?? 0),
     });
     message.success('授权配置已保存，立即生效');
@@ -383,6 +392,27 @@ export default function TenantDetailPage() {
             <Form.Item
               name="allowDeleteFiles"
               label="允许删除文件"
+              valuePropName="checked"
+            >
+              <Switch checkedChildren="开" unCheckedChildren="关" />
+            </Form.Item>
+            <Form.Item
+              name="allowEditMessages"
+              label="允许编辑聊天记录"
+              valuePropName="checked"
+            >
+              <Switch checkedChildren="开" unCheckedChildren="关" />
+            </Form.Item>
+            <Form.Item
+              name="allowAdminTransfer"
+              label="允许企业后台转接客服"
+              valuePropName="checked"
+            >
+              <Switch checkedChildren="开" unCheckedChildren="关" />
+            </Form.Item>
+            <Form.Item
+              name="allowAgentTransfer"
+              label="允许客服端转接客服"
               valuePropName="checked"
             >
               <Switch checkedChildren="开" unCheckedChildren="关" />

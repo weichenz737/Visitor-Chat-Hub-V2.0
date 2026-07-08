@@ -125,6 +125,12 @@ export const tenantApi = {
   deleteMessage: (id: string) =>
     request<{ success: boolean }>(`/tenant-admin/messages/${id}`, { method: 'DELETE' }),
 
+  updateMessage: (id: string, data: { content?: string; fileName?: string }) =>
+    request<{ success: boolean }>(`/tenant-admin/messages/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
   deleteChatUserMessages: (userId: string) =>
     request<{ deleted: number }>(`/tenant-admin/chat-users/${userId}/messages`, { method: 'DELETE' }),
 
@@ -172,6 +178,9 @@ export const tenantApi = {
       allowDeleteMessages: boolean;
       allowDeleteSessions: boolean;
       allowDeleteFiles: boolean;
+      allowEditMessages: boolean;
+      allowAdminTransfer: boolean;
+      allowAgentTransfer: boolean;
       maxAgentCount: number;
       currentAgentCount: number;
       canCreateAgent: boolean;

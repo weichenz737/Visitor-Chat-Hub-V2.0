@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AgentService } from './agent.service';
+import { TenantAuthorizationService } from '../../common/services/tenant-authorization.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -18,7 +19,19 @@ import type { AuthPayload } from '../../common/decorators/auth.decorator';
 @Controller('agents')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AgentController {
-  constructor(private readonly agentService: AgentService) {}
+  constructor(
+    private readonly agentService: AgentService,
+    private readonly tenantAuth: TenantAuthorizationService,
+  ) {}
+
+  @Get('me/authorizations')
+  @Roles('agent')
+  async getMyAuthorizations(@CurrentUser() user: AuthPayload) {
+    const auth = await this.tenantAuth.getAuthorizations(user.tenantId!);
+    return {
+      allowAgentTransfer: auth.allowAgentTransfer,
+    };
+  }
 
   @Get('me/profile')
   @Roles('agent')
