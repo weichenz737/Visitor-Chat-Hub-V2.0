@@ -47,6 +47,7 @@ services:
       PUBLIC_API_URL: ${PUBLIC_BASE_URL}:3000
     command: >
       sh -c "npm install &&
+      touch /app/.deps-ready &&
       cd backend &&
       npx prisma generate &&
       for i in 1 2 3 4 5 6 7 8 9 10; do npx prisma migrate deploy && break || sleep 5; done &&
@@ -70,8 +71,9 @@ services:
       VITE_API_URL: ${PUBLIC_BASE_URL}:3000
       VITE_WS_URL: ${PUBLIC_BASE_URL}:3000/ws
     command: >
-      sh -c "sleep 90 &&
-      npm run dev -w @cs/user-web -- --host 0.0.0.0 --port 5173"
+      sh -c "while [ ! -f /app/.deps-ready ]; do echo waiting for deps...; sleep 5; done &&
+      npm run build -w @cs/user-web &&
+      npm run preview -w @cs/user-web -- --host 0.0.0.0 --port 5173"
     ports:
       - "5173:5173"
     depends_on:
@@ -90,8 +92,9 @@ services:
       VITE_USER_WEB_URL: ${PUBLIC_BASE_URL}:5173
       VITE_TENANT_CODE: demo001
     command: >
-      sh -c "sleep 90 &&
-      npm run dev -w @cs/agent-web -- --host 0.0.0.0 --port 5174"
+      sh -c "while [ ! -f /app/.deps-ready ]; do echo waiting for deps...; sleep 5; done &&
+      npm run build -w @cs/agent-web &&
+      npm run preview -w @cs/agent-web -- --host 0.0.0.0 --port 5174"
     ports:
       - "5174:5174"
     depends_on:
@@ -108,8 +111,9 @@ services:
       VITE_API_URL: ${PUBLIC_BASE_URL}:3000
       VITE_WS_URL: ${PUBLIC_BASE_URL}:3000/ws
     command: >
-      sh -c "sleep 90 &&
-      npm run dev -w @cs/admin-web -- --host 0.0.0.0 --port 5175"
+      sh -c "while [ ! -f /app/.deps-ready ]; do echo waiting for deps...; sleep 5; done &&
+      npm run build -w @cs/admin-web &&
+      npm run preview -w @cs/admin-web -- --host 0.0.0.0 --port 5175"
     ports:
       - "5175:5175"
     depends_on:
@@ -126,8 +130,9 @@ services:
       VITE_API_URL: ${PUBLIC_BASE_URL}:3000
       VITE_WS_URL: ${PUBLIC_BASE_URL}:3000/ws
     command: >
-      sh -c "sleep 90 &&
-      npm run dev -w @cs/tenant-admin-web -- --host 0.0.0.0 --port 5177"
+      sh -c "while [ ! -f /app/.deps-ready ]; do echo waiting for deps...; sleep 5; done &&
+      npm run build -w @cs/tenant-admin-web &&
+      npm run preview -w @cs/tenant-admin-web -- --host 0.0.0.0 --port 5177"
     ports:
       - "5177:5177"
     depends_on:
@@ -144,8 +149,9 @@ services:
       VITE_API_URL: ${PUBLIC_BASE_URL}:3000
       VITE_WS_URL: ${PUBLIC_BASE_URL}:3000/ws
     command: >
-      sh -c "sleep 90 &&
-      npm run dev -w @cs/sdk-widget -- --host 0.0.0.0 --port 5176"
+      sh -c "while [ ! -f /app/.deps-ready ]; do echo waiting for deps...; sleep 5; done &&
+      npm run build -w @cs/sdk-widget &&
+      npm run preview -w @cs/sdk-widget -- --host 0.0.0.0 --port 5176"
     ports:
       - "5176:5176"
     depends_on:

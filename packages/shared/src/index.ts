@@ -138,4 +138,5 @@ export async function uploadFile(
   return res.json();
 }
 
+export { useAuthStore } from './auth-store';
 export { useChatStore } from './store';

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, Form, Input, Typography, message } from 'antd';
-import { useChatStore } from '@cs/shared/src/store';
+import { useAuthStore } from '@cs/shared/src/auth-store';
 import { accountRules } from '../utils/account';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { auth, loginTenantAdmin, loading } = useChatStore();
+  const { auth, loginTenantAdmin, loading } = useAuthStore();
   const [form] = Form.useForm();
   const [error, setError] = useState('');
 

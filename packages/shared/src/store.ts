@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import {
   API_BASE,
   WS_URL,
@@ -7,12 +7,11 @@ import {
   uploadFile,
   decodeFileName,
   type AuthState,
-  type AgentStatus,
   type Conversation,
   type Message,
   type Session,
-  type StaffRole,
 } from '@cs/shared';
+import { useAuthStore } from './auth-store';
 
 interface ChatStore {
   auth: AuthState | null;
@@ -188,112 +187,21 @@ export const useChatStore = create<ChatStore>((set, get) => {
   },
 
   loginAgent: async (account, password, tenantCode) => {
-    set({ loading: true, error: null });
-    try {
-      const data = await apiFetch<{
-        accessToken: string;
-        agent: {
-          id: string;
-          name: string;
-          tenantCode: string;
-          staffRole: string;
-          agentCode?: string;
-          status?: string;
-          phone?: string;
-        };
-      }>('/auth/agent/login', {
-        method: 'POST',
-        body: JSON.stringify({ email: account, password, tenantCode }),
-      });
-      set({
-        auth: {
-          token: data.accessToken,
-          role: 'agent',
-          tenantId: data.agent.tenantCode,
-          tenantCode: data.agent.tenantCode,
-          staffRole: 'AGENT',
-          userId: data.agent.id,
-          name: data.agent.name,
-          agentCode: data.agent.agentCode,
-          agentStatus: (data.agent.status as AgentStatus) ?? 'OFFLINE',
-          phone: data.agent.phone,
-        },
-        loading: false,
-      });
-      queueMicrotask(() => {
-        get().connectWs();
-        get().loadConversations();
-      });
-    } catch (e) {
-      set({ loading: false, error: (e as Error).message });
-      throw e;
-    }
+    await useAuthStore.getState().loginAgent(account, password, tenantCode);
+    queueMicrotask(() => {
+      get().connectWs();
+      get().loadConversations();
+    });
   },
 
-  loginTenantAdmin: async (account, password, tenantCode) => {
-    set({ loading: true, error: null });
-    try {
-      const data = await apiFetch<{
-        accessToken: string;
-        user: {
-          id: string;
-          name: string;
-          tenantCode: string;
-          tenantName: string;
-          staffRole: StaffRole;
-        };
-      }>('/auth/tenant/login', {
-        method: 'POST',
-        body: JSON.stringify({ email: account, password, tenantCode }),
-      });
-      set({
-        auth: {
-          token: data.accessToken,
-          role: 'tenant_admin',
-          tenantId: data.user.tenantCode,
-          tenantCode: data.user.tenantCode,
-          staffRole: data.user.staffRole,
-          userId: data.user.id,
-          name: data.user.name,
-        },
-        loading: false,
-      });
-    } catch (e) {
-      const message = (e as Error).message;
-      set({ loading: false, error: message });
-      throw e;
-    }
-  },
+  loginTenantAdmin: (account, password, tenantCode) =>
+    useAuthStore.getState().loginTenantAdmin(account, password, tenantCode),
 
-  loginPlatformAdmin: async (email, password) => {
-    set({ loading: true, error: null });
-    try {
-      const data = await apiFetch<{
-        accessToken: string;
-        admin: { id: string; name: string };
-      }>('/auth/platform/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-      set({
-        auth: {
-          token: data.accessToken,
-          role: 'platform_admin',
-          userId: data.admin.id,
-          name: data.admin.name,
-        },
-        loading: false,
-      });
-    } catch (e) {
-      const message = (e as Error).message;
-      set({ loading: false, error: message });
-      throw e;
-    }
-  },
+  loginPlatformAdmin: (email, password) =>
+    useAuthStore.getState().loginPlatformAdmin(email, password),
 
-  loginAdmin: async (email, password) => {
-    return get().loginPlatformAdmin(email, password);
-  },
+  loginAdmin: (email, password) =>
+    useAuthStore.getState().loginAdmin(email, password),
 
   loadMyConversation: async (agentCode) => {
     const { auth } = get();
@@ -341,16 +249,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
       socket.disconnect();
     }
 
-    const s = io(WS_URL, {
-      auth: { token: auth.token },
-      transports: ['websocket'],
-    });
+    void import('socket.io-client').then(({ io }) => {
+      if (get().auth?.token !== auth.token) return;
 
-    s.on('connect', () => {
-      set({ connected: true });
-      if (get().auth?.role === 'agent') syncAgentOnline(s);
-    });
-    s.on('disconnect', () => set({ connected: false }));
+      const s = io(WS_URL, {
+        auth: { token: auth.token },
+        transports: ['websocket'],
+      });
+
+      s.on('connect', () => {
+        set({ connected: true });
+        if (get().auth?.role === 'agent') syncAgentOnline(s);
+      });
+      s.on('disconnect', () => set({ connected: false }));
 
     s.on('message', (msg: Message) => {
       set((state) => {
@@ -530,6 +441,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     });
 
     set({ socket: s });
+    });
   },
 
   disconnectWs: () => {
@@ -763,8 +675,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }).catch(() => undefined);
     }
     get().disconnectWs();
+    useAuthStore.getState().clearAuth();
     set({
-      auth: null,
       conversation: null,
       conversations: [],
       session: null,
@@ -774,6 +686,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
     });
   },
 };
+});
+
+useAuthStore.subscribe((state) => {
+  useChatStore.setState({
+    auth: state.auth,
+    loading: state.loading,
+    error: state.error,
+  });
 });
 
 export { API_BASE };
