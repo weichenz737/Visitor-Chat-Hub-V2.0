@@ -131,11 +131,57 @@ input:focus, textarea:focus {
 
 .message-list {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
+}
+
+.message-list-virtuoso {
+  height: 100%;
+}
+
+/* Virtuoso 每项需为 flex 列，气泡 align-self 才能左右分栏 */
+.message-list-virtuoso .message-item-wrap {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 0;
+  gap: 8px;
+}
+
+.message-list-virtuoso .message-item-wrap > .message-bubble,
+.message-list-virtuoso .message-item-wrap > .message-system {
+  /* keep bubble sizing inside the flex row */
+  flex-shrink: 0;
+}
+
+.messages-loading-older,
+.messages-load-hint {
+  text-align: center;
+  font-size: 12px;
+  color: #94a3b8;
+  padding: 8px;
+}
+
+.message-bubble--failed {
+  outline: 1px solid #f87171;
+}
+
+.retry-send-btn {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.85;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
 }
 
 .message-bubble {

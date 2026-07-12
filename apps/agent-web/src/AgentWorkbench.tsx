@@ -1,13 +1,8 @@
-import { useEffect, useRef, useState, Fragment, type ReactNode } from 'react';
-
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useChatStore } from '@cs/shared/src/store';
-
-import { apiFetch, formatVisitorDisplay, getFileDisplayName, MessageContent, type AgentStatus, type Conversation, type Message } from '@cs/shared';
-
+import { apiFetch, formatVisitorDisplay, getFileDisplayName, MessageContent, VirtualMessageList, type AgentStatus, type Conversation, type Message } from '@cs/shared';
 import { AgentHeader } from './AgentHeader';
-
 import { UserPanel } from './UserPanel';
-
 import { SESSION_STATUS_LABELS } from './api';
 
 
@@ -290,63 +285,65 @@ function QuickReplyManager({
 
 
 
-function ConversationMessages({ messages }: { messages: Message[] }) {
-
+function ConversationMessages({
+  messages,
+  firstItemIndex,
+  hasMore,
+  loadingOlder,
+  onLoadOlder,
+}: {
+  messages: Message[];
+  firstItemIndex: number;
+  hasMore: boolean;
+  loadingOlder?: boolean;
+  onLoadOlder: () => void;
+}) {
   return (
-
-    <>
-
-      {messages.map((msg, i) => {
-
+    <VirtualMessageList
+      className="message-list-virtuoso"
+      messages={messages}
+      firstItemIndex={firstItemIndex}
+      hasMore={hasMore}
+      loadingOlder={loadingOlder}
+      onLoadOlder={onLoadOlder}
+      renderMessage={(msg, i) => {
         const prev = messages[i - 1];
-
         const showDivider = prev && prev.sessionId !== msg.sessionId;
-
         return (
-
-          <Fragment key={msg.id}>
-
+          <>
             {showDivider && <div className="session-divider">本次会话已结束</div>}
-
             <MessageItem msg={msg} />
-
-          </Fragment>
-
+          </>
         );
-
-      })}
-
-    </>
-
+      }}
+    />
   );
-
 }
 
-
-
 function MessageItem({ msg }: { msg: Message }) {
-
   if (msg.senderType === 'SYSTEM') {
-
     return <div className="message-system">{msg.content}</div>;
-
   }
 
   const isMine = msg.senderType === 'AGENT';
-
   const isMedia = msg.type === 'IMAGE' || msg.type === 'VIDEO';
   const isFile = msg.type === 'FILE';
+  const failed = msg.localStatus === 'failed';
 
   return (
-
-    <div className={`message-bubble ${isMine ? 'mine' : 'theirs'}${isMedia ? ' message-bubble--media' : ''}${isFile ? ' message-bubble--file' : ''}`}>
-
+    <div className={`message-bubble ${isMine ? 'mine' : 'theirs'}${isMedia ? ' message-bubble--media' : ''}${isFile ? ' message-bubble--file' : ''}${failed ? ' message-bubble--failed' : ''}`}>
       {msg.type !== 'TEXT' ? <MessageContent msg={msg} /> : msg.content}
-
+      {failed && msg.clientId && (
+        <button
+          type="button"
+          className="retry-send-btn"
+          onClick={() => useChatStore.getState().retryFailedMessage(msg.clientId!)}
+        >
+          重试
+        </button>
+      )}
     </div>
-
   );
-
 }
 
 
@@ -367,6 +364,18 @@ export default function AgentWorkbench() {
 
     messages,
 
+    messagesHasMore,
+
+    messagesLoadingOlder,
+
+    messagesFirstItemIndex,
+
+    conversationsHasMore,
+
+    conversationsLoadingMore,
+
+    sendError,
+
     connected,
 
     connectWs,
@@ -374,6 +383,10 @@ export default function AgentWorkbench() {
     selectConversation,
 
     loadConversations,
+
+    loadMoreConversations,
+
+    loadOlderMessages,
 
     sendMessage,
 
@@ -406,8 +419,6 @@ export default function AgentWorkbench() {
   const [onlineAgents, setOnlineAgents] = useState<{ id: string; name: string; status?: string }[]>([]);
 
   const [inboxTab, setInboxTab] = useState<'active' | 'archived'>('active');
-
-  const listRef = useRef<HTMLDivElement>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -499,14 +510,6 @@ export default function AgentWorkbench() {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [connected, auth?.token]);
-
-
-
-  useEffect(() => {
-
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-
-  }, [messages]);
 
 
 
@@ -703,6 +706,17 @@ export default function AgentWorkbench() {
 
           })}
 
+          {conversationsHasMore && (
+            <button
+              type="button"
+              className="load-more-inbox"
+              disabled={conversationsLoadingMore}
+              onClick={() => void loadMoreConversations(inboxTab === 'archived')}
+            >
+              {conversationsLoadingMore ? '加载中…' : '加载更多会话'}
+            </button>
+          )}
+
         </aside>
 
 
@@ -752,11 +766,17 @@ export default function AgentWorkbench() {
 
               )}
 
-              <div className="message-list" ref={listRef}>
-
-                <ConversationMessages messages={messages} />
-
+              <div className="message-list">
+                <ConversationMessages
+                  messages={messages}
+                  firstItemIndex={messagesFirstItemIndex}
+                  hasMore={messagesHasMore}
+                  loadingOlder={messagesLoadingOlder}
+                  onLoadOlder={() => void loadOlderMessages()}
+                />
               </div>
+
+              {sendError && <div className="error-banner">{sendError}</div>}
 
               <div className="quick-replies">
 

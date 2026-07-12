@@ -25,6 +25,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     },
   });
   if (!res.ok) {
+    if (res.status === 401) {
+      try {
+        const { useAuthStore } = await import('@cs/shared/src/auth-store');
+        useAuthStore.getState().clearAuth();
+      } catch {
+        /* ignore */
+      }
+      throw new Error('Unauthorized');
+    }
     const err = await res.json().catch(() => ({ message: res.statusText }));
     const msg = err.message ?? '请求失败';
     message.error(msg);
@@ -130,6 +139,43 @@ export const tenantApi = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  replaceMessageMedia: async (id: string, file: File, fileName?: string) => {
+    const token = tokenGetter?.();
+    const form = new FormData();
+    form.append('file', file);
+    if (fileName) form.append('file_name', fileName);
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/tenant-admin/messages/${id}/media`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: form,
+      });
+    } catch {
+      const msg = '无法连接服务器，请确认后端已启动';
+      message.error(msg);
+      throw new Error(msg);
+    }
+    if (!res.ok) {
+      if (res.status === 401) {
+        try {
+          const { useAuthStore } = await import('@cs/shared/src/auth-store');
+          useAuthStore.getState().clearAuth();
+        } catch {
+          /* ignore */
+        }
+        throw new Error('Unauthorized');
+      }
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      const msg = err.message ?? '请求失败';
+      message.error(msg);
+      throw new Error(msg);
+    }
+    return res.json() as Promise<{ message: unknown }>;
+  },
 
   deleteChatUserMessages: (userId: string) =>
     request<{ deleted: number }>(`/tenant-admin/chat-users/${userId}/messages`, { method: 'DELETE' }),

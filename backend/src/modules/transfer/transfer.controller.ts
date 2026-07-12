@@ -42,6 +42,10 @@ export class TransferController {
     @CurrentUser() user: AuthPayload,
     @Param('sessionId') sessionId: string,
   ) {
-    return this.transferService.listBySession(user.tenantId!, sessionId);
+    return this.transferService.listBySession(
+      user.tenantId!,
+      sessionId,
+      user.sub,
+    );
   }
 }

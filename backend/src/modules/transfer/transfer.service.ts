@@ -2,12 +2,14 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SessionService } from '../session/session.service';
 import { AgentService } from '../agent/agent.service';
+import { SessionAuthorizationService } from '../session/session-authorization.service';
 
 @Injectable()
 export class TransferService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessionService: SessionService,
+    private readonly sessionAuthorization: SessionAuthorizationService,
     private readonly agentService: AgentService,
   ) {}
 
@@ -22,6 +24,11 @@ export class TransferService {
       throw new BadRequestException('Cannot transfer to the same agent');
     }
 
+    await this.sessionAuthorization.assertAssignedAgent(
+      tenantId,
+      sessionId,
+      fromAgentId,
+    );
     const session = await this.sessionService.findById(tenantId, sessionId);
     if (session.status === 'CLOSED') {
       throw new BadRequestException('Session is closed');
@@ -30,7 +37,10 @@ export class TransferService {
       throw new BadRequestException('Session is removed');
     }
 
-    await this.agentService.findById(tenantId, toAgentId);
+    const toAgent = await this.agentService.findById(tenantId, toAgentId);
+    if (toAgent.role !== 'AGENT') {
+      throw new BadRequestException('只能转接给客服角色的用户');
+    }
 
     const [transfer, updatedSession] = await this.prisma.$transaction([
       this.prisma.transfer.create({
@@ -105,8 +115,16 @@ export class TransferService {
     });
   }
 
-  async listBySession(tenantId: string, sessionId: string) {
-    await this.sessionService.findById(tenantId, sessionId);
+  async listBySession(
+    tenantId: string,
+    sessionId: string,
+    agentId: string,
+  ) {
+    await this.sessionAuthorization.assertAgentAccess(
+      tenantId,
+      sessionId,
+      agentId,
+    );
     return this.prisma.transfer.findMany({
       where: { tenantId, sessionId },
       include: {

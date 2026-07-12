@@ -11,7 +11,9 @@ export interface TranscriptMessage {
   type: string;
   content: string;
   fileName?: string | null;
+  file_name?: string | null;
   fileSize?: number | null;
+  file_size?: number | null;
   createdAt: string;
 }
 
@@ -22,14 +24,19 @@ function formatTime(iso: string) {
 }
 
 function toMessage(msg: TranscriptMessage): Message {
+  const fileName = msg.file_name ?? msg.fileName ?? null;
+  const fileSize = msg.file_size ?? msg.fileSize ?? null;
   return {
     id: msg.id,
     sessionId: msg.sessionId ?? '',
     senderType: msg.senderType as Message['senderType'],
     type: msg.type as Message['type'],
     content: msg.content,
-    file_name: msg.fileName,
-    file_size: msg.fileSize,
+    file_url: msg.type === 'FILE' || msg.type === 'IMAGE' || msg.type === 'VIDEO'
+      ? msg.content
+      : undefined,
+    file_name: fileName,
+    file_size: fileSize,
     createdAt: msg.createdAt,
   };
 }

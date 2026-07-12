@@ -14,12 +14,25 @@ import { LoginLogModule } from '../admin/login-log.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET') ?? 'default-secret',
-        signOptions: {
-          expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '7d') as `${number}d`,
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const secret = config.get<string>('JWT_SECRET');
+        if (!secret) {
+          throw new Error('JWT_SECRET is required');
+        }
+        if (
+          secret === 'default-secret' ||
+          secret === 'change-me-in-production' ||
+          secret === 'replace-with-at-least-32-random-characters'
+        ) {
+          throw new Error('JWT_SECRET must not use a known default value');
+        }
+        return {
+          secret,
+          signOptions: {
+            expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '7d') as `${number}d`,
+          },
+        };
+      },
     }),
   ],
   controllers: [AuthController],

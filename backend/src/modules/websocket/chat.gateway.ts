@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -18,13 +19,21 @@ import { TenantAuthorizationService } from '../../common/services/tenant-authori
 import { RedisService } from '../../redis/redis.service';
 import { AuthPayload } from '../../common/decorators/auth.decorator';
 import { MessageType } from '@prisma/client';
+import { SessionAuthorizationService } from '../session/session-authorization.service';
+
+const wsCorsOrigins = process.env.CORS_ORIGINS?.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 interface WsAuthPayload extends AuthPayload {
   sessionId?: string;
 }
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: {
+    origin: wsCorsOrigins?.length ? wsCorsOrigins : false,
+    credentials: true,
+  },
   namespace: '/ws',
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -38,6 +47,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly conversationService: ConversationService,
     private readonly transferService: TransferService,
     private readonly agentService: AgentService,
+    private readonly sessionAuthorization: SessionAuthorizationService,
     private readonly tenantAuth: TenantAuthorizationService,
     private readonly redis: RedisService,
   ) {}
@@ -50,10 +60,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return `tenant:${tenantId}:agents`;
   }
 
+  private agentRoom(tenantId: string, agentId: string) {
+    return `tenant:${tenantId}:agent:${agentId}`;
+  }
+
   private authenticate(socket: Socket): WsAuthPayload | null {
-    const token =
-      (socket.handshake.auth?.token as string) ||
-      (socket.handshake.query?.token as string);
+    const token = socket.handshake.auth?.token as string;
     if (!token) return null;
     try {
       return this.jwtService.verify<WsAuthPayload>(token);
@@ -75,14 +87,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const user = socket.data.user as WsAuthPayload | undefined;
     if (!user?.tenantId) return;
 
-    if (user.role === 'user') {
-      await this.redis
-        .getClient()
-        .srem(this.redis.tenantOnlineUsersKey(user.tenantId), user.sub);
-    }
-    if (user.role === 'agent') {
-      await this.unregisterAgentConnection(user.tenantId, user.sub, socket.id);
-      socket.leave(this.tenantRoom(user.tenantId));
+    try {
+      if (user.role === 'user') {
+        await this.redis
+          .getClient()
+          .srem(this.redis.tenantOnlineUsersKey(user.tenantId), user.sub);
+      }
+      if (user.role === 'agent') {
+        await this.unregisterAgentConnection(user.tenantId, user.sub, socket.id);
+        socket.leave(this.tenantRoom(user.tenantId));
+      }
+    } catch {
+      // Ignore redis/shutdown races during process teardown.
     }
   }
 
@@ -129,6 +145,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const user = socket.data.user as WsAuthPayload;
     if (user.role !== 'user') return { error: 'Unauthorized' };
 
+    await this.sessionAuthorization.assertUserAccess(
+      user.tenantId!,
+      body.sessionId,
+      user.sub,
+    );
     const session = await this.sessionService.findById(
       user.tenantId!,
       body.sessionId,
@@ -175,6 +196,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     await this.registerAgentConnection(user.tenantId!, user.sub, socket.id);
     socket.join(this.tenantRoom(user.tenantId!));
+    socket.join(this.agentRoom(user.tenantId!, user.sub));
 
     const assignedSessions = await this.sessionService.assignPreferredWaitingSessions(
       user.tenantId!,
@@ -215,7 +237,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const user = socket.data.user as WsAuthPayload;
     if (!user?.tenantId) return { error: 'Unauthorized' };
 
-    await this.sessionService.findById(user.tenantId, body.sessionId);
+    try {
+      await this.sessionAuthorization.assertActorAccess(
+        user.tenantId,
+        body.sessionId,
+        user.role,
+        user.sub,
+      );
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : '无权访问此会话' };
+    }
     socket.join(this.roomName(user.tenantId, body.sessionId));
     return { ok: true };
   }
@@ -236,59 +267,70 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const user = socket.data.user as WsAuthPayload;
     if (!user?.tenantId) return { error: 'Unauthorized' };
 
-    const result = await this.messageService.create(user.tenantId, {
-      sessionId: body.sessionId,
-      senderType: user.role === 'agent' ? 'AGENT' : 'USER',
-      senderId: user.sub,
-      type: body.type ?? 'TEXT',
-      content: body.content,
-      fileName: body.file_name,
-      fileSize: body.file_size,
-      metadata: body.metadata,
-    });
+    try {
+      const result = await this.messageService.create(user.tenantId, {
+        sessionId: body.sessionId,
+        senderType: user.role === 'agent' ? 'AGENT' : 'USER',
+        senderId: user.sub,
+        type: body.type ?? 'TEXT',
+        content: body.content,
+        fileName: body.file_name,
+        fileSize: body.file_size,
+        metadata: body.metadata,
+      });
 
-    const { message, session } = result;
-    const payload = { event: 'message', data: message };
-    const sessionRoom = this.roomName(user.tenantId, session.id);
-    const agentsRoom = this.tenantRoom(user.tenantId);
-    this.server.to(sessionRoom).emit('message', message);
-    this.server.to(agentsRoom).emit('message', message);
+      const { message, session } = result;
+      const payload = { event: 'message', data: message };
+      const sessionRoom = this.roomName(user.tenantId, session.id);
+      const agentTarget = session.agentId
+        ? this.agentRoom(user.tenantId, session.agentId)
+        : session.preferredAgentId
+          ? this.agentRoom(user.tenantId, session.preferredAgentId)
+          : this.tenantRoom(user.tenantId);
+      // Chained .to() is union+dedupe; keep also working when rooms differ.
+      this.server.to(sessionRoom).emit('message', message);
+      if (agentTarget !== sessionRoom) {
+        this.server.to(agentTarget).emit('message', message);
+      }
 
-    if (session.id !== body.sessionId) {
-      socket.join(this.roomName(user.tenantId, session.id));
-      this.server
-        .to(this.roomName(user.tenantId, session.id))
-        .emit('session_resume', {
-          conversationId: session.conversationId,
-          session,
-        });
-      if (session.status === 'WAITING') {
-        const assigned = await this.sessionService.autoAssign(
-          user.tenantId,
-          session.id,
-        );
-        if (assigned.agentId) {
-          const assignPayload = {
-            sessionId: session.id,
-            agent: assigned.agent,
-            status: 'ACTIVE' as const,
-          };
-          this.server
-            .to(this.tenantRoom(user.tenantId))
-            .emit('session_assigned', assignPayload);
-          this.server
-            .to(this.roomName(user.tenantId, session.id))
-            .emit('session_assigned', assignPayload);
+      if (session.id !== body.sessionId) {
+        socket.join(this.roomName(user.tenantId, session.id));
+        this.server
+          .to(this.roomName(user.tenantId, session.id))
+          .emit('session_resume', {
+            conversationId: session.conversationId,
+            session,
+          });
+        if (session.status === 'WAITING') {
+          const assigned = await this.sessionService.autoAssign(
+            user.tenantId,
+            session.id,
+          );
+          if (assigned.agentId) {
+            const assignPayload = {
+              sessionId: session.id,
+              agent: assigned.agent,
+              status: 'ACTIVE' as const,
+            };
+            this.server
+              .to(this.tenantRoom(user.tenantId))
+              .emit('session_assigned', assignPayload);
+            this.server
+              .to(this.roomName(user.tenantId, session.id))
+              .emit('session_assigned', assignPayload);
+          }
         }
       }
+
+      await this.redis.getClient().publish(
+        this.redis.wsChannel(user.tenantId, session.id),
+        JSON.stringify(payload),
+      );
+
+      return { ok: true, message, session };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : '发送失败' };
     }
-
-    await this.redis.getClient().publish(
-      this.redis.wsChannel(user.tenantId, session.id),
-      JSON.stringify(payload),
-    );
-
-    return { ok: true, message, session };
   }
 
   @SubscribeMessage('transfer_session')
@@ -323,16 +365,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: { messageId: string; sessionId: string },
   ) {
     const user = socket.data.user as WsAuthPayload;
-    const message = await this.messageService.markRead(
-      user.tenantId!,
-      body.messageId,
-    );
+    try {
+      const message = await this.messageService.markRead(
+        user.tenantId!,
+        body.messageId,
+        user.role,
+        user.sub,
+      );
 
-    this.server
-      .to(this.roomName(user.tenantId!, body.sessionId))
-      .emit('read_receipt', { messageId: body.messageId, readAt: message.readAt });
+      this.server
+        .to(this.roomName(user.tenantId!, message.sessionId))
+        .emit('read_receipt', { messageId: body.messageId, readAt: message.readAt });
 
-    return { ok: true };
+      return { ok: true };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : '已读回执失败' };
+    }
   }
 
   @SubscribeMessage('session_status')
@@ -342,6 +390,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     body: { sessionId: string; status: 'WAITING' | 'ACTIVE' | 'CLOSED' },
   ) {
     const user = socket.data.user as WsAuthPayload;
+    if (user.role !== 'agent') return { error: 'Unauthorized' };
+    await this.sessionAuthorization.assertAssignedAgent(
+      user.tenantId!,
+      body.sessionId,
+      user.sub,
+    );
     if (body.status === 'CLOSED') {
       return { error: '请使用结束会话接口' };
     }
@@ -445,6 +499,76 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           .to(this.roomName(tenantId, session.id))
           .emit('user_profile_updated', payload);
       }
+    }
+  }
+
+  private agentInboxRoom(
+    tenantId: string,
+    session: { agentId?: string | null; preferredAgentId?: string | null },
+  ) {
+    if (session.agentId) return this.agentRoom(tenantId, session.agentId);
+    if (session.preferredAgentId) {
+      return this.agentRoom(tenantId, session.preferredAgentId);
+    }
+    return this.tenantRoom(tenantId);
+  }
+
+  notifyMessageDeleted(
+    tenantId: string,
+    data: {
+      sessionId: string;
+      messageId: string;
+      agentId?: string | null;
+      preferredAgentId?: string | null;
+    },
+  ) {
+    const payload = {
+      sessionId: data.sessionId,
+      messageId: data.messageId,
+    };
+    // Emit per-room (not chained): clients in only one room still receive.
+    // Overlap is fine — clients dedupe by message id where needed.
+    this.server
+      .to(this.roomName(tenantId, data.sessionId))
+      .emit('message_deleted', payload);
+    this.server
+      .to(this.agentInboxRoom(tenantId, data))
+      .emit('message_deleted', payload);
+  }
+
+  notifyMessageUpdated(
+    tenantId: string,
+    session: {
+      id: string;
+      agentId?: string | null;
+      preferredAgentId?: string | null;
+    },
+    message: Record<string, unknown>,
+  ) {
+    this.server
+      .to(this.roomName(tenantId, session.id))
+      .emit('message_updated', message);
+    this.server
+      .to(this.agentInboxRoom(tenantId, session))
+      .emit('message_updated', message);
+  }
+
+  notifyMessagesCleared(
+    tenantId: string,
+    sessions: Array<{
+      id: string;
+      agentId?: string | null;
+      preferredAgentId?: string | null;
+    }>,
+  ) {
+    for (const session of sessions) {
+      const payload = { sessionId: session.id };
+      this.server
+        .to(this.roomName(tenantId, session.id))
+        .emit('messages_cleared', payload);
+      this.server
+        .to(this.agentInboxRoom(tenantId, session))
+        .emit('messages_cleared', payload);
     }
   }
 }

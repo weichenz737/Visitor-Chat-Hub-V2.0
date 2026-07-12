@@ -155,11 +155,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+  overflow: hidden;
   padding: 12px calc(12px + var(--safe-right)) 12px calc(12px + var(--safe-left));
+}
+
+.user-app .message-list-virtuoso {
+  height: 100%;
 }
 
 .user-app .message-bubble {

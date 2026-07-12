@@ -250,6 +250,45 @@ export class SessionService {
     });
   }
 
+  async claimForAgent(
+    tenantId: string,
+    sessionId: string,
+    agentId: string,
+  ) {
+    const session = await this.findById(tenantId, sessionId);
+    if (session.agentId === agentId) return session;
+    if (
+      session.status !== 'WAITING' ||
+      session.agentId ||
+      (session.preferredAgentId &&
+        session.preferredAgentId !== agentId)
+    ) {
+      throw new ForbiddenException('该会话不可由当前客服接入');
+    }
+
+    await this.agentService.findById(tenantId, agentId);
+    const claimed = await this.prisma.session.updateMany({
+      where: {
+        id: sessionId,
+        tenantId,
+        status: 'WAITING',
+        agentId: null,
+        OR: [
+          { preferredAgentId: null },
+          { preferredAgentId: agentId },
+        ],
+      },
+      data: { agentId, status: 'ACTIVE' },
+    });
+
+    if (claimed.count !== 1) {
+      const latest = await this.findById(tenantId, sessionId);
+      if (latest.agentId === agentId) return latest;
+      throw new ForbiddenException('该会话已被其他客服接入');
+    }
+    return this.findById(tenantId, sessionId);
+  }
+
   async autoAssign(tenantId: string, sessionId: string) {
     const session = await this.findById(tenantId, sessionId);
     if (session.status !== 'WAITING' || session.agentId) {

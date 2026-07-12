@@ -137,6 +137,7 @@
   border: none !important;
   box-shadow: none;
   max-width: min(320px, 85vw);
+  color: inherit;
 }
 
 .chat-transcript-list .message-system {
@@ -168,27 +169,30 @@
   margin: 0 8px;
 }
 
+/* Match agent/user chat file bubble (shared styles.css .file-card) */
 .chat-transcript-list .file-card {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
   border-radius: 10px;
-  min-width: 200px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  min-width: 220px;
+  color: #0f172a;
 }
 
 .chat-transcript-list .file-card-icon-wrap {
   flex-shrink: 0;
   width: 36px;
   height: 36px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #eef2ff;
-  border-radius: 8px;
-  color: #4f46e5;
+  background: #eff6ff;
+  color: #2563eb;
 }
 
 .chat-transcript-list .file-card-icon {
@@ -203,22 +207,33 @@
 
 .chat-transcript-list .file-card-name {
   font-size: 13px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-all;
+  color: #0f172a;
 }
 
 .chat-transcript-list .file-card-size {
+  margin-top: 2px;
   font-size: 11px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .chat-transcript-list .file-card-download {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
   font-size: 12px;
-  color: #4f46e5;
+  font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
+  background: #2563eb;
+  color: #fff !important;
+}
+
+.chat-transcript-list .file-card-download:hover {
+  background: #1d4ed8;
+  color: #fff !important;
 }
 
 .chat-transcript-empty {

@@ -138,43 +138,54 @@ export class ConversationService {
 
     const total = await this.prisma.conversation.count({ where });
 
-    const sessionToConversation = new Map<string, string>();
-    for (const conv of conversations) {
-      for (const session of conv.sessions) {
-        sessionToConversation.set(session.id, conv.id);
-      }
-    }
-    const sessionIds = [...sessionToConversation.keys()];
-    const unreadByConversation = new Map<string, number>();
-    if (sessionIds.length) {
+    const accessibleSessionIds = conversations.flatMap((conv) =>
+      conv.sessions
+        .filter(
+          (s) =>
+            s.agentId === agentId ||
+            (s.status === 'WAITING' &&
+              !s.agentId &&
+              (!s.preferredAgentId || s.preferredAgentId === agentId)),
+        )
+        .map((s) => s.id),
+    );
+    const unreadBySession = new Map<string, number>();
+    if (accessibleSessionIds.length) {
       const unreadRows = await this.prisma.message.groupBy({
         by: ['sessionId'],
         where: {
           tenantId,
-          sessionId: { in: sessionIds },
+          sessionId: { in: accessibleSessionIds },
           senderType: 'USER',
           readAt: null,
         },
         _count: { _all: true },
       });
       for (const row of unreadRows) {
-        const conversationId = sessionToConversation.get(row.sessionId);
-        if (!conversationId) continue;
-        unreadByConversation.set(
-          conversationId,
-          (unreadByConversation.get(conversationId) ?? 0) + row._count._all,
-        );
+        unreadBySession.set(row.sessionId, row._count._all);
       }
     }
 
     const items = conversations.map((conv) => {
-      const openSession = conv.sessions.find((s) =>
-        s.status === 'WAITING' || s.status === 'ACTIVE',
+      const accessibleSessions = conv.sessions.filter(
+        (s) =>
+          s.agentId === agentId ||
+          (s.status === 'WAITING' &&
+            !s.agentId &&
+            (!s.preferredAgentId || s.preferredAgentId === agentId)),
       );
-      const currentSession = openSession ?? conv.sessions[0] ?? null;
-      const lastMessage = conv.sessions
+      const openSession = accessibleSessions.find(
+        (s) => s.status === 'WAITING' || s.status === 'ACTIVE',
+      );
+      const currentSession = openSession ?? accessibleSessions[0] ?? null;
+      const lastMessage = accessibleSessions
         .flatMap((s) => s.messages)
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+
+      const unreadCount = accessibleSessions.reduce(
+        (sum, s) => sum + (unreadBySession.get(s.id) ?? 0),
+        0,
+      );
 
       return {
         id: conv.id,
@@ -191,7 +202,7 @@ export class ConversationService {
             }
           : null,
         lastMessage: lastMessage ? toMessageDto(lastMessage) : null,
-        unreadCount: unreadByConversation.get(conv.id) ?? 0,
+        unreadCount,
         updatedAt: conv.updatedAt,
         createdAt: conv.createdAt,
       };
@@ -236,7 +247,21 @@ export class ConversationService {
   ) {
     await this.assertAgentAccess(tenantId, conversationId, agentId);
     const sessions = await this.prisma.session.findMany({
-      where: { tenantId, conversationId },
+      where: {
+        tenantId,
+        conversationId,
+        OR: [
+          { agentId },
+          {
+            status: 'WAITING',
+            agentId: null,
+            OR: [
+              { preferredAgentId: null },
+              { preferredAgentId: agentId },
+            ],
+          },
+        ],
+      },
       select: { id: true },
     });
     if (!sessions.length) return { updated: 0 };

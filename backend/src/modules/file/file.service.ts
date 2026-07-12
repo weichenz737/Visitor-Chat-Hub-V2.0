@@ -47,6 +47,48 @@ export class FileService {
     return this.prisma.fileUpload.create({ data: dto });
   }
 
+  updateUrl(id: string, url: string) {
+    return this.prisma.fileUpload.update({
+      where: { id },
+      data: { url },
+    });
+  }
+
+  resolveAbsolutePath(storagePath: string): string {
+    const normalized = storagePath.replace(/\\/g, '/');
+    if (
+      normalized.includes('..') ||
+      normalized.startsWith('/') ||
+      /^[a-zA-Z]:/.test(normalized)
+    ) {
+      throw new NotFoundException('非法文件路径');
+    }
+    const uploadDir = process.env.UPLOAD_DIR ?? './uploads';
+    return join(process.cwd(), uploadDir, normalized);
+  }
+
+  async findByIdOrUrl(idOrPath: string, tenantId?: string) {
+    const byId = await this.prisma.fileUpload.findFirst({
+      where: {
+        id: idOrPath,
+        ...(tenantId ? { tenantId } : {}),
+      },
+    });
+    if (byId) return byId;
+
+    const storagePath = this.extractStoragePath(idOrPath) ?? idOrPath;
+    return this.prisma.fileUpload.findFirst({
+      where: {
+        OR: [
+          { storagePath },
+          { url: { endsWith: `/uploads/${storagePath}` } },
+          { url: { endsWith: `/files/${idOrPath}` } },
+        ],
+        ...(tenantId ? { tenantId } : {}),
+      },
+    });
+  }
+
   linkToMessage(tenantId: string, url: string, messageId: string) {
     return this.prisma.fileUpload.updateMany({
       where: { tenantId, url, messageId: null },
@@ -181,10 +223,14 @@ export class FileService {
   }
 
   private extractStoragePath(url: string): string | null {
-    const marker = '/uploads/';
-    const idx = url.indexOf(marker);
-    if (idx === -1) return null;
-    return url.slice(idx + marker.length);
+    const uploadsMarker = '/uploads/';
+    const uploadsIdx = url.indexOf(uploadsMarker);
+    if (uploadsIdx !== -1) return url.slice(uploadsIdx + uploadsMarker.length);
+
+    const filesMatch = url.match(/\/files\/([0-9a-f-]{36})/i);
+    if (filesMatch) return null;
+
+    return null;
   }
 
   private getFileSizeFromDisk(storagePath: string): number {

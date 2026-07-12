@@ -33,6 +33,10 @@ async function authFetch<T>(
     },
   });
   if (!res.ok) {
+    if (res.status === 401) {
+      useAuthStore.getState().clearAuth();
+      throw new Error('Unauthorized');
+    }
     const err = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(err.message ?? 'Request failed');
   }

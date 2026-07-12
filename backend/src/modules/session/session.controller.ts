@@ -18,12 +18,14 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/auth.decorator';
 import type { AuthPayload } from '../../common/decorators/auth.decorator';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { SessionAuthorizationService } from './session-authorization.service';
 
 @Controller('sessions')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class SessionController {
   constructor(
     private readonly sessionService: SessionService,
+    private readonly sessionAuthorization: SessionAuthorizationService,
     private readonly moduleRef: ModuleRef,
   ) {}
 
@@ -56,15 +58,15 @@ export class SessionController {
   @Get(':id')
   @Roles('user', 'agent', 'tenant_admin')
   async findOne(@CurrentUser() user: AuthPayload, @Param('id') id: string) {
-    const session = await this.sessionService.findById(user.tenantId!, id);
-    if (
-      user.role === 'agent' &&
-      session.agentId &&
-      session.agentId !== user.sub &&
-      session.status !== 'WAITING'
-    ) {
-      throw new ForbiddenException('无权查看此会话');
+    if (user.role === 'user' || user.role === 'agent') {
+      await this.sessionAuthorization.assertActorAccess(
+        user.tenantId!,
+        id,
+        user.role,
+        user.sub,
+      );
     }
+    const session = await this.sessionService.findById(user.tenantId!, id);
     return session;
   }
 
@@ -75,8 +77,14 @@ export class SessionController {
     @Param('id') id: string,
     @Body() body: { agentId?: string },
   ) {
-    const agentId = body.agentId ?? user.sub;
-    const session = await this.sessionService.assignAgent(user.tenantId!, id, agentId);
+    if (body.agentId && body.agentId !== user.sub) {
+      throw new ForbiddenException('客服只能将等待会话分配给自己');
+    }
+    const session = await this.sessionService.claimForAgent(
+      user.tenantId!,
+      id,
+      user.sub,
+    );
     const gateway = this.moduleRef.get(ChatGateway, { strict: false });
     gateway?.notifySessionAssigned(user.tenantId!, session);
     return session;

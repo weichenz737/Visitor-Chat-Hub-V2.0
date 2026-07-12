@@ -9,8 +9,14 @@ import {
   Put,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { extname } from 'path';
 import { Request } from 'express';
 import { TenantStatus } from '@prisma/client';
 import { AdminService } from './admin.service';
@@ -22,6 +28,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/auth.decorator';
 import type { AuthPayload } from '../../common/decorators/auth.decorator';
+import { ALLOWED_UPLOAD_TYPES } from '../../common/utils/upload-types';
 
 function getLogContext(req: Request, user: AuthPayload) {
   return {
@@ -420,10 +427,48 @@ export class AdminController {
         getLogContext(req, user),
         '编辑消息',
         id,
-        body.content?.slice(0, 200),
+        body.content?.slice(0, 200) ?? body.fileName,
       );
       return res;
     });
+  }
+
+  @Post('messages/:id/media')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      fileFilter: (_req, file, cb) => {
+        const extension = extname(file.originalname).toLowerCase();
+        const allowedMimeTypes = ALLOWED_UPLOAD_TYPES[extension];
+        if (!allowedMimeTypes?.includes(file.mimetype)) {
+          cb(new BadRequestException('不支持的文件类型'), false);
+          return;
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  replaceMessageMedia(
+    @Req() req: Request,
+    @CurrentUser() user: AuthPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { file_name?: string },
+  ) {
+    return this.chatAdminService
+      .replaceMessageMedia(undefined, id, file, {
+        fileName: body.file_name,
+        uploaderId: user.sub,
+      })
+      .then(async (res) => {
+        await this.operationLogService.create(
+          getLogContext(req, user),
+          '替换消息媒体',
+          id,
+        );
+        return res;
+      });
   }
 
   @Delete('chat-users/:userId/messages')

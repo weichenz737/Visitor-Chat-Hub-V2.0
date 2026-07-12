@@ -1,7 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -16,12 +15,8 @@ async function bootstrap() {
 
   const corsOrigins = process.env.CORS_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean);
   app.enableCors({
-    origin: corsOrigins?.length ? corsOrigins : true,
+    origin: corsOrigins?.length ? corsOrigins : false,
     credentials: true,
-  });
-
-  app.useStaticAssets(join(process.cwd(), process.env.UPLOAD_DIR ?? 'uploads'), {
-    prefix: '/uploads',
   });
 
   const port = process.env.PORT ?? 3000;

@@ -1,15 +1,57 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { ModuleRef } from '@nestjs/core';
+import { MessageSenderType, MessageType, Prisma } from '@prisma/client';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
+import { extname, join } from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FileService } from '../file/file.service';
+import { ChatGateway } from '../websocket/chat.gateway';
 import { enrichMessagesWithSenderNames } from '../../common/utils/message-sender.util';
+import {
+  ALLOWED_UPLOAD_TYPES,
+  assertFileMagicMatchesExtension,
+} from '../../common/utils/upload-types';
+import {
+  decodeFileName,
+  fixFileNameEncoding,
+  toMessageDto,
+} from '../../common/utils/file-message.util';
+
+const MEDIA_TYPES: MessageType[] = ['IMAGE', 'VIDEO', 'FILE'];
+
+function assertExtensionMatchesMessageType(
+  messageType: MessageType,
+  extension: string,
+) {
+  if (messageType === 'IMAGE') {
+    if (!['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(extension)) {
+      throw new BadRequestException('请上传图片文件');
+    }
+  } else if (messageType === 'VIDEO') {
+    if (!['.mp4', '.webm', '.mov'].includes(extension)) {
+      throw new BadRequestException('请上传视频文件');
+    }
+  }
+}
 
 @Injectable()
 export class ChatAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fileService: FileService,
+    private readonly config: ConfigService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  private getGateway(): ChatGateway | null {
+    try {
+      return this.moduleRef.get(ChatGateway, { strict: false });
+    } catch {
+      return null;
+    }
+  }
 
   async listChatUsers(
     tenantId: string | undefined,
@@ -306,24 +348,59 @@ export class ChatAdminService {
       { userNickname: user.nickname, visitorNo: user.visitorNo },
     );
 
-    return { user, messages: enrichedMessages, total, page, limit };
+    return {
+      user,
+      messages: enrichedMessages.map((m) => {
+        const dto = toMessageDto(m);
+        return {
+          ...dto,
+          // Admin transcript UI historically reads camelCase fields.
+          fileName: 'file_name' in dto ? dto.file_name : m.fileName,
+          fileSize: 'file_size' in dto ? dto.file_size : m.fileSize,
+          senderName: m.senderName,
+          session: m.session,
+        };
+      }),
+      total,
+      page,
+      limit,
+    };
   }
 
   async deleteMessage(tenantId: string | undefined, messageId: string) {
     const where: Prisma.MessageWhereInput = { id: messageId };
     if (tenantId) where.tenantId = tenantId;
 
-    const msg = await this.prisma.message.findFirst({ where });
+    const msg = await this.prisma.message.findFirst({
+      where,
+      include: {
+        session: {
+          select: {
+            id: true,
+            agentId: true,
+            preferredAgentId: true,
+          },
+        },
+      },
+    });
     if (!msg) throw new NotFoundException('消息不存在');
 
     const fileRecord = await this.prisma.fileUpload.findFirst({
-      where: { messageId },
+      where: { messageId, tenantId: msg.tenantId },
     });
     if (fileRecord) {
-      await this.fileService.delete(tenantId, fileRecord.id);
+      await this.fileService.delete(msg.tenantId, fileRecord.id);
     }
 
     await this.prisma.message.delete({ where: { id: messageId } });
+
+    this.getGateway()?.notifyMessageDeleted(msg.tenantId, {
+      sessionId: msg.sessionId,
+      messageId: msg.id,
+      agentId: msg.session.agentId,
+      preferredAgentId: msg.session.preferredAgentId,
+    });
+
     return { success: true };
   }
 
@@ -340,6 +417,9 @@ export class ChatAdminService {
       include: {
         session: {
           select: {
+            id: true,
+            agentId: true,
+            preferredAgentId: true,
             userId: true,
             user: { select: { nickname: true, visitorNo: true } },
           },
@@ -352,6 +432,19 @@ export class ChatAdminService {
       throw new BadRequestException('请提供要修改的内容');
     }
 
+    const isMedia = MEDIA_TYPES.includes(msg.type);
+    if (isMedia && data.content !== undefined) {
+      throw new BadRequestException(
+        '图片/视频/文件请通过重新上传替换，不能直接修改链接',
+      );
+    }
+    if (isMedia && msg.type !== 'FILE' && data.fileName !== undefined) {
+      throw new BadRequestException('仅文件消息可修改文件名');
+    }
+    if (!isMedia && data.fileName !== undefined && data.content === undefined) {
+      throw new BadRequestException('文本消息不支持修改文件名');
+    }
+
     const update: Prisma.MessageUpdateInput = {};
     if (data.content !== undefined) {
       const content = data.content.trim();
@@ -359,13 +452,39 @@ export class ChatAdminService {
       update.content = content;
     }
     if (data.fileName !== undefined) {
-      update.fileName = data.fileName.trim() || null;
+      const displayName = data.fileName.trim() || null;
+      update.fileName = displayName;
+      if (msg.type === 'FILE') {
+        const prevMeta =
+          msg.metadata && typeof msg.metadata === 'object' && !Array.isArray(msg.metadata)
+            ? { ...(msg.metadata as Record<string, unknown>) }
+            : {};
+        if (displayName) {
+          prevMeta.file_name = displayName;
+          prevMeta.filename = displayName;
+        } else {
+          delete prevMeta.file_name;
+          delete prevMeta.filename;
+        }
+        if (typeof msg.fileSize === 'number' && msg.fileSize > 0) {
+          prevMeta.file_size = msg.fileSize;
+        }
+        update.metadata = prevMeta as Prisma.InputJsonValue;
+      }
     }
 
     const updated = await this.prisma.message.update({
       where: { id: messageId },
       data: update,
     });
+
+    if (msg.type === 'FILE' && data.fileName !== undefined) {
+      const displayName = data.fileName.trim() || null;
+      await this.prisma.fileUpload.updateMany({
+        where: { messageId: msg.id, tenantId: msg.tenantId },
+        data: { fileName: displayName ?? updated.fileName ?? 'file' },
+      });
+    }
 
     const [enriched] = await enrichMessagesWithSenderNames(
       this.prisma,
@@ -377,7 +496,174 @@ export class ChatAdminService {
       },
     );
 
-    return { message: enriched };
+    const dto = toMessageDto(updated) as unknown as Record<string, unknown>;
+    this.getGateway()?.notifyMessageUpdated(
+      msg.tenantId,
+      {
+        id: msg.sessionId,
+        agentId: msg.session.agentId,
+        preferredAgentId: msg.session.preferredAgentId,
+      },
+      dto,
+    );
+
+    return {
+      message: {
+        ...toMessageDto(updated),
+        fileName: updated.fileName,
+        fileSize: updated.fileSize,
+        senderName: enriched.senderName,
+      },
+    };
+  }
+
+  async replaceMessageMedia(
+    tenantId: string | undefined,
+    messageId: string,
+    file: Express.Multer.File,
+    options: {
+      fileName?: string;
+      uploaderId: string;
+    },
+  ) {
+    if (!file) throw new BadRequestException('请上传文件');
+
+    const where: Prisma.MessageWhereInput = { id: messageId };
+    if (tenantId) where.tenantId = tenantId;
+
+    const msg = await this.prisma.message.findFirst({
+      where,
+      include: {
+        session: {
+          select: {
+            id: true,
+            agentId: true,
+            preferredAgentId: true,
+            user: { select: { nickname: true, visitorNo: true } },
+          },
+        },
+      },
+    });
+    if (!msg) throw new NotFoundException('消息不存在');
+    if (!MEDIA_TYPES.includes(msg.type)) {
+      throw new BadRequestException('仅图片/视频/文件消息支持重新上传');
+    }
+
+    const extension = extname(file.originalname).toLowerCase();
+    const allowedMimeTypes = ALLOWED_UPLOAD_TYPES[extension];
+    if (!allowedMimeTypes?.includes(file.mimetype)) {
+      throw new BadRequestException('不支持的文件类型');
+    }
+    assertExtensionMatchesMessageType(msg.type, extension);
+
+    const now = new Date();
+    const filename = `${uuidv4()}${extension}`;
+    const relativeDir = `${msg.tenantId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const uploadRoot = join(process.cwd(), process.env.UPLOAD_DIR ?? './uploads');
+    const absDir = join(uploadRoot, relativeDir);
+    if (!existsSync(absDir)) mkdirSync(absDir, { recursive: true });
+    const absPath = join(absDir, filename);
+    writeFileSync(absPath, file.buffer);
+
+    try {
+      assertFileMagicMatchesExtension(absPath, file.originalname);
+    } catch {
+      try {
+        unlinkSync(absPath);
+      } catch {
+        /* ignore */
+      }
+      throw new BadRequestException('文件内容与扩展名不匹配');
+    }
+
+    const relativePath = `${relativeDir}/${filename}`;
+    const displayName =
+      decodeFileName(options.fileName) ??
+      decodeFileName(file.originalname) ??
+      fixFileNameEncoding(file.originalname);
+
+    const baseUrl =
+      this.config.get<string>('PUBLIC_API_URL') ??
+      process.env.PUBLIC_API_URL ??
+      `http://localhost:${this.config.get('PORT') ?? 3000}`;
+
+    const oldFiles = await this.prisma.fileUpload.findMany({
+      where: { messageId: msg.id, tenantId: msg.tenantId },
+      select: { id: true },
+    });
+
+    const record = await this.fileService.createRecord({
+      tenantId: msg.tenantId,
+      uploaderType: MessageSenderType.SYSTEM,
+      uploaderId: options.uploaderId,
+      fileName: displayName,
+      fileSize: file.size,
+      mimeType: file.mimetype,
+      storagePath: relativePath,
+      url: '',
+    });
+
+    const fileUrl = `${baseUrl.replace(/\/$/, '')}/files/${record.id}`;
+    await this.fileService.updateUrl(record.id, fileUrl);
+    await this.prisma.fileUpload.update({
+      where: { id: record.id },
+      data: { messageId: msg.id },
+    });
+
+    const prevMeta =
+      msg.metadata && typeof msg.metadata === 'object' && !Array.isArray(msg.metadata)
+        ? { ...(msg.metadata as Record<string, unknown>) }
+        : {};
+    prevMeta.file_name = displayName;
+    prevMeta.filename = displayName;
+    prevMeta.file_size = file.size;
+
+    const updated = await this.prisma.message.update({
+      where: { id: msg.id },
+      data: {
+        content: fileUrl,
+        fileName: displayName,
+        fileSize: file.size,
+        metadata: prevMeta as Prisma.InputJsonValue,
+      },
+    });
+
+    for (const old of oldFiles) {
+      try {
+        await this.fileService.delete(msg.tenantId, old.id);
+      } catch {
+        /* ignore missing/orphan cleanup errors */
+      }
+    }
+
+    const [enriched] = await enrichMessagesWithSenderNames(
+      this.prisma,
+      msg.tenantId,
+      [updated],
+      {
+        userNickname: msg.session.user.nickname,
+        visitorNo: msg.session.user.visitorNo,
+      },
+    );
+
+    this.getGateway()?.notifyMessageUpdated(
+      msg.tenantId,
+      {
+        id: msg.sessionId,
+        agentId: msg.session.agentId,
+        preferredAgentId: msg.session.preferredAgentId,
+      },
+      toMessageDto(updated) as unknown as Record<string, unknown>,
+    );
+
+    return {
+      message: {
+        ...toMessageDto(updated),
+        fileName: updated.fileName,
+        fileSize: updated.fileSize,
+        senderName: enriched.senderName,
+      },
+    };
   }
 
   async deleteChatUserMessages(tenantId: string | undefined, userId: string) {
@@ -392,7 +678,7 @@ export class ChatAdminService {
 
     const sessions = await this.prisma.session.findMany({
       where: sessionWhere,
-      select: { id: true },
+      select: { id: true, agentId: true, preferredAgentId: true },
     });
     const sessionIds = sessions.map((s) => s.id);
     if (!sessionIds.length) return { deleted: 0 };
@@ -410,14 +696,16 @@ export class ChatAdminService {
 
     if (messageIds.length) {
       const fileRecords = await this.prisma.fileUpload.findMany({
-        where: { messageId: { in: messageIds } },
+        where: { messageId: { in: messageIds }, tenantId: user.tenantId },
         select: { id: true },
       });
       for (const f of fileRecords) {
-        await this.fileService.delete(tenantId, f.id);
+        await this.fileService.delete(user.tenantId, f.id);
       }
       await this.prisma.message.deleteMany({ where: { id: { in: messageIds } } });
     }
+
+    this.getGateway()?.notifyMessagesCleared(user.tenantId, sessions);
 
     return { deleted: messageIds.length };
   }

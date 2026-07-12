@@ -8,8 +8,14 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { extname } from 'path';
 import { ModuleRef } from '@nestjs/core';
 import { TenantAdminService } from './tenant-admin.service';
 import { ChatAdminService } from '../chat-admin/chat-admin.service';
@@ -24,6 +30,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { StaffRoles } from '../../common/decorators/staff-roles.decorator';
 import { CurrentUser } from '../../common/decorators/auth.decorator';
 import type { AuthPayload } from '../../common/decorators/auth.decorator';
+import { ALLOWED_UPLOAD_TYPES } from '../../common/utils/upload-types';
 
 @Controller('tenant-admin')
 @UseGuards(JwtAuthGuard, RolesGuard, StaffRolesGuard)
@@ -229,6 +236,35 @@ export class TenantAdminController {
   ) {
     await this.tenantAuth.assertAllowEditMessages(user.tenantId!);
     return this.chatAdminService.updateMessage(user.tenantId!, id, body);
+  }
+
+  @Post('messages/:id/media')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      fileFilter: (_req, file, cb) => {
+        const extension = extname(file.originalname).toLowerCase();
+        const allowedMimeTypes = ALLOWED_UPLOAD_TYPES[extension];
+        if (!allowedMimeTypes?.includes(file.mimetype)) {
+          cb(new BadRequestException('不支持的文件类型'), false);
+          return;
+        }
+        cb(null, true);
+      },
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  async replaceMessageMedia(
+    @CurrentUser() user: AuthPayload,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { file_name?: string },
+  ) {
+    await this.tenantAuth.assertAllowEditMessages(user.tenantId!);
+    return this.chatAdminService.replaceMessageMedia(user.tenantId!, id, file, {
+      fileName: body.file_name,
+      uploaderId: user.sub,
+    });
   }
 
   @Delete('chat-users/:userId/messages')

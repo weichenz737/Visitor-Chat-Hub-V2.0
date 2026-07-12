@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useChatStore } from '@cs/shared/src/store';
 import type { Message } from '@cs/shared';
-import { MessageContent } from '@cs/shared';
+import { MessageContent, VirtualMessageList } from '@cs/shared';
 import '@cs/shared/src/styles.css';
 
 const API_KEY = import.meta.env.VITE_API_KEY ?? 'cs_demo_api_key_12345';
@@ -10,12 +10,24 @@ function MessageItem({ msg }: { msg: Message }) {
   const isUser = msg.senderType === 'USER';
   const isMedia = msg.type === 'IMAGE' || msg.type === 'VIDEO';
   const isFile = msg.type === 'FILE';
+  const failed = msg.localStatus === 'failed';
   return (
-    <div className={`message-bubble ${isUser ? 'user' : 'agent'}${isMedia ? ' message-bubble--media' : ''}${isFile ? ' message-bubble--file' : ''}`}>
+    <div
+      className={`message-bubble ${isUser ? 'user' : 'agent'}${isMedia ? ' message-bubble--media' : ''}${isFile ? ' message-bubble--file' : ''}${failed ? ' message-bubble--failed' : ''}`}
+    >
       {msg.type === 'IMAGE' || msg.type === 'VIDEO' || msg.type === 'FILE' ? (
         <MessageContent msg={msg} />
       ) : (
         msg.content
+      )}
+      {failed && msg.clientId && (
+        <button
+          type="button"
+          className="retry-send-btn"
+          onClick={() => useChatStore.getState().retryFailedMessage(msg.clientId!)}
+        >
+          重试
+        </button>
       )}
     </div>
   );
@@ -29,18 +41,22 @@ export type CSWidgetOptions = {
 export function CSWidget({ apiKey = API_KEY, slug }: { apiKey?: string; slug?: string }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
-  const listRef = useRef<HTMLDivElement>(null);
 
   const {
     auth,
     session,
     messages,
+    messagesHasMore,
+    messagesLoadingOlder,
+    messagesFirstItemIndex,
+    sendError,
     connected,
     initUser,
     createSession,
     connectWs,
     sendMessage,
     loadMessages,
+    loadOlderMessages,
   } = useChatStore();
 
   useEffect(() => {
@@ -58,10 +74,6 @@ export function CSWidget({ apiKey = API_KEY, slug }: { apiKey?: string; slug?: s
     }
   }, [session?.id, open]);
 
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages]);
-
   return (
     <>
       <button className="widget-fab" onClick={() => setOpen(!open)}>
@@ -75,10 +87,17 @@ export function CSWidget({ apiKey = API_KEY, slug }: { apiKey?: string; slug?: s
               {connected ? '● 在线' : '○ 连接中'}
             </span>
           </div>
-          <div className="message-list" ref={listRef} style={{ flex: 1 }}>
-            {messages.map((msg) => (
-              <MessageItem key={msg.id} msg={msg} />
-            ))}
+          {sendError && <div className="error-banner">{sendError}</div>}
+          <div className="message-list" style={{ flex: 1, minHeight: 0 }}>
+            <VirtualMessageList
+              className="message-list-virtuoso"
+              messages={messages}
+              firstItemIndex={messagesFirstItemIndex}
+              hasMore={messagesHasMore}
+              loadingOlder={messagesLoadingOlder}
+              onLoadOlder={() => void loadOlderMessages()}
+              renderMessage={(msg) => <MessageItem msg={msg} />}
+            />
           </div>
           <div className="chat-input">
             <input

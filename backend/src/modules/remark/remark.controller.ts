@@ -47,7 +47,7 @@ export class RemarkController {
     @CurrentUser() user: AuthPayload,
     @Param('userId') userId: string,
   ) {
-    return this.remarkService.listByUser(user.tenantId!, userId);
+    return this.remarkService.listByUser(user.tenantId!, userId, user.sub);
   }
 
   @Patch(':id')
@@ -56,6 +56,6 @@ export class RemarkController {
     @Param('id') id: string,
     @Body() body: { content?: string; tags?: string[] },
   ) {
-    return this.remarkService.update(user.tenantId!, id, body);
+    return this.remarkService.update(user.tenantId!, id, user.sub, body);
   }
 }

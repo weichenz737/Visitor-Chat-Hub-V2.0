@@ -3,12 +3,14 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ConfigProvider, App as AntApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { useAuthStore } from '@cs/shared/src/auth-store';
+import { setMediaTokenGetter } from '@cs/shared';
 import { setTokenGetter } from './api/client';
 import LoginPage from './pages/Login';
 import PageLoader from './components/PageLoader';
 
 // Register before any child useEffect fires (children effects run before parent effects).
 setTokenGetter(() => useAuthStore.getState().auth?.token ?? null);
+setMediaTokenGetter(() => useAuthStore.getState().auth?.token ?? null);
 
 const TenantLayout = lazy(() => import('./layouts/TenantLayout'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));

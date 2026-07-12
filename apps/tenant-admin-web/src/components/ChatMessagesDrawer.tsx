@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Button, DatePicker, Drawer, Form, Input, Modal, Pagination, Popconfirm, Select, Space, Spin, message,
+  Button, DatePicker, Drawer, Form, Input, Modal, Pagination, Popconfirm, Select, Space, Spin, Upload, message,
 } from 'antd';
+import { UploadOutlined } from '@ant-design/icons';
+import type { UploadFile } from 'antd/es/upload/interface';
 import { type Dayjs } from 'dayjs';
-import { ChatTranscript, type TranscriptMessage } from '@cs/shared';
+import { ChatTranscript, MessageContent, type TranscriptMessage, type Message } from '@cs/shared';
 import { tenantApi } from '../api/client';
 
 export interface ChatUserRef {
@@ -36,6 +38,26 @@ function toMessageFilters(values: {
   };
 }
 
+function toPreviewMessage(msg: TranscriptMessage): Message {
+  return {
+    id: msg.id,
+    sessionId: msg.sessionId ?? '',
+    senderType: msg.senderType as Message['senderType'],
+    type: msg.type as Message['type'],
+    content: msg.content,
+    file_url: msg.content,
+    file_name: msg.file_name ?? msg.fileName,
+    file_size: msg.file_size ?? msg.fileSize,
+    createdAt: msg.createdAt,
+  };
+}
+
+function uploadAccept(type: string) {
+  if (type === 'IMAGE') return 'image/jpeg,image/png,image/gif,image/webp';
+  if (type === 'VIDEO') return 'video/mp4,video/webm,video/quicktime';
+  return undefined;
+}
+
 interface ChatMessagesDrawerProps {
   open: boolean;
   user?: ChatUserRef | null;
@@ -62,6 +84,9 @@ export default function ChatMessagesDrawer({
   const [filters, setFilters] = useState<MessageFilters>({});
   const [editForm] = Form.useForm();
   const [editing, setEditing] = useState<TranscriptMessage | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const pendingFileRef = useRef<File | null>(null);
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [saving, setSaving] = useState(false);
 
   const loadMessages = useCallback(async (
@@ -123,34 +148,82 @@ export default function ChatMessagesDrawer({
     onChanged?.();
   };
 
+  const closeEdit = () => {
+    setEditing(null);
+    pendingFileRef.current = null;
+    setPendingFile(null);
+    setFileList([]);
+    editForm.resetFields();
+  };
+
   const openEdit = (msg: TranscriptMessage) => {
     setEditing(msg);
+    pendingFileRef.current = null;
+    setPendingFile(null);
+    setFileList([]);
     editForm.setFieldsValue({
       content: msg.content,
-      fileName: msg.fileName ?? '',
+      fileName: msg.fileName ?? msg.file_name ?? '',
     });
+  };
+
+  const resolvePendingFile = (): File | null => {
+    if (pendingFileRef.current) return pendingFileRef.current;
+    if (pendingFile) return pendingFile;
+    const fromList = fileList[0]?.originFileObj;
+    return fromList ?? null;
   };
 
   const submitEdit = async () => {
     if (!editing) return;
-    const values = await editForm.validateFields();
     setSaving(true);
     try {
-      const payload: { content?: string; fileName?: string } = {};
       if (editing.type === 'TEXT' || editing.type === 'SYSTEM') {
-        payload.content = values.content;
+        const values = await editForm.validateFields(['content']);
+        await tenantApi.updateMessage(editing.id, { content: values.content });
+      } else if (editing.type === 'IMAGE' || editing.type === 'VIDEO') {
+        const file = resolvePendingFile();
+        if (!file) {
+          message.warning(editing.type === 'IMAGE' ? '请选择新图片' : '请选择新视频');
+          throw new Error('missing file');
+        }
+        await tenantApi.replaceMessageMedia(editing.id, file);
       } else if (editing.type === 'FILE') {
-        payload.content = values.content;
-        payload.fileName = values.fileName;
+        const values = await editForm.validateFields(['fileName']);
+        const file = resolvePendingFile();
+        if (file) {
+          await tenantApi.replaceMessageMedia(editing.id, file, values.fileName);
+        } else if (fileList.length > 0) {
+          message.error('未能读取所选文件，请重新选择后再保存');
+          throw new Error('missing file');
+        } else {
+          const nextName = String(values.fileName ?? '').trim();
+          const prevName = (editing.fileName ?? editing.file_name ?? '').trim();
+          if (!nextName) {
+            message.warning('请输入文件名称');
+            throw new Error('missing file name');
+          }
+          if (nextName === prevName) {
+            message.info('文件名称未修改');
+            throw new Error('unchanged');
+          }
+          await tenantApi.updateMessage(editing.id, { fileName: nextName });
+        }
       } else {
-        payload.content = values.content;
+        message.error('不支持编辑该类型消息');
+        throw new Error('unsupported');
       }
-      await tenantApi.updateMessage(editing.id, payload);
       message.success('消息已更新');
-      setEditing(null);
-      editForm.resetFields();
-      if (user) loadMessages(user, msgPage, filters);
+      closeEdit();
+      if (user) await loadMessages(user, msgPage, filters);
       onChanged?.();
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        ['missing file', 'missing file name', 'unchanged', 'unsupported'].includes(e.message)
+      ) {
+        return;
+      }
     } finally {
       setSaving(false);
     }
@@ -163,6 +236,10 @@ export default function ChatMessagesDrawer({
     onClose();
     onChanged?.();
   };
+
+  const isMediaEdit =
+    editing?.type === 'IMAGE' || editing?.type === 'VIDEO' || editing?.type === 'FILE';
+  const requireNewFile = editing?.type === 'IMAGE' || editing?.type === 'VIDEO';
 
   return (
     <Drawer
@@ -239,9 +316,10 @@ export default function ChatMessagesDrawer({
       <Modal
         title="编辑消息"
         open={!!editing}
-        onCancel={() => { setEditing(null); editForm.resetFields(); }}
+        onCancel={closeEdit}
         onOk={submitEdit}
         confirmLoading={saving}
+        okButtonProps={{ disabled: requireNewFile && !pendingFile && fileList.length === 0 }}
         destroyOnClose
       >
         <Form form={editForm} layout="vertical">
@@ -254,32 +332,73 @@ export default function ChatMessagesDrawer({
               <Input.TextArea rows={4} maxLength={2000} showCount />
             </Form.Item>
           )}
-          {editing?.type === 'FILE' && (
+
+          {isMediaEdit && editing && (
             <>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ marginBottom: 8, color: 'rgba(0,0,0,0.65)' }}>当前内容</div>
+                <div className="chat-transcript-list" style={{ maxHeight: 220, overflow: 'auto' }}>
+                  <MessageContent msg={toPreviewMessage(editing)} />
+                </div>
+              </div>
+
+              {editing.type === 'FILE' && (
+                <Form.Item
+                  name="fileName"
+                  label="文件名称"
+                  rules={[{ required: true, message: '请输入文件名称' }]}
+                >
+                  <Input maxLength={255} />
+                </Form.Item>
+              )}
+
               <Form.Item
-                name="fileName"
-                label="文件名称"
-                rules={[{ required: true, message: '请输入文件名称' }]}
+                label={
+                  editing.type === 'IMAGE'
+                    ? '替换图片'
+                    : editing.type === 'VIDEO'
+                      ? '替换视频'
+                      : '替换文件（可选）'
+                }
+                required={requireNewFile}
+                extra={
+                  requireNewFile
+                    ? '必须上传新文件后才能保存'
+                    : '不上传则仅更新显示名称'
+                }
               >
-                <Input maxLength={255} />
-              </Form.Item>
-              <Form.Item
-                name="content"
-                label="文件链接"
-                rules={[{ required: true, message: '请输入文件链接' }]}
-              >
-                <Input maxLength={2000} />
+                <Upload
+                  accept={uploadAccept(editing.type)}
+                  maxCount={1}
+                  fileList={fileList}
+                  beforeUpload={(file) => {
+                    pendingFileRef.current = file;
+                    setPendingFile(file);
+                    setFileList([
+                      {
+                        uid: file.uid,
+                        name: file.name,
+                        status: 'done',
+                        size: file.size,
+                        type: file.type,
+                        originFileObj: file,
+                      },
+                    ]);
+                    if (editing.type === 'FILE') {
+                      editForm.setFieldsValue({ fileName: file.name });
+                    }
+                    return false;
+                  }}
+                  onRemove={() => {
+                    pendingFileRef.current = null;
+                    setPendingFile(null);
+                    setFileList([]);
+                  }}
+                >
+                  <Button icon={<UploadOutlined />}>选择文件</Button>
+                </Upload>
               </Form.Item>
             </>
-          )}
-          {(editing?.type === 'IMAGE' || editing?.type === 'VIDEO') && (
-            <Form.Item
-              name="content"
-              label={editing.type === 'IMAGE' ? '图片链接' : '视频链接'}
-              rules={[{ required: true, message: '请输入链接' }]}
-            >
-              <Input maxLength={2000} />
-            </Form.Item>
           )}
         </Form>
       </Modal>

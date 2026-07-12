@@ -4,6 +4,7 @@ import {
 } from 'antd';
 import { DeleteOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { fetchAuthMediaBlobUrl } from '@cs/shared';
 import { tenantApi } from '../api/client';
 import { useTenantAuthorizations } from '../hooks/useTenantAuthorizations';
 
@@ -188,7 +189,20 @@ export default function FilesPage() {
               title: '操作',
               render: (_, r) => (
                 <Space>
-                  <a href={r.url} target="_blank" rel="noreferrer">查看</a>
+                  <a
+                    href={r.url}
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      try {
+                        const blobUrl = await fetchAuthMediaBlobUrl(r.url);
+                        window.open(blobUrl, '_blank', 'noopener,noreferrer');
+                      } catch {
+                        message.error('文件打开失败');
+                      }
+                    }}
+                  >
+                    查看
+                  </a>
                   {auth.allowDeleteFiles && (
                     <Popconfirm title="确定删除此文件？" onConfirm={() => deleteFile(r.id)}>
                       <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>

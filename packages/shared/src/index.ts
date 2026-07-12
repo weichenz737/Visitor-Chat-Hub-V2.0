@@ -58,6 +58,7 @@ export interface Conversation {
 export interface Message {
   id: string;
   sessionId: string;
+  conversationId?: string;
   senderType: 'USER' | 'AGENT' | 'SYSTEM';
   senderId?: string | null;
   type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE';
@@ -68,6 +69,17 @@ export interface Message {
   metadata?: Record<string, unknown> | null;
   createdAt: string;
   readAt?: string | null;
+  /** Client-only send lifecycle */
+  localStatus?: 'pending' | 'failed';
+  clientId?: string;
+}
+
+export class ApiAuthError extends Error {
+  status = 401;
+  constructor(message = 'Unauthorized') {
+    super(message);
+    this.name = 'ApiAuthError';
+  }
 }
 
 export interface Tenant {
@@ -93,6 +105,15 @@ export async function apiFetch<T>(
     },
   });
   if (!res.ok) {
+    if (res.status === 401) {
+      try {
+        const { useAuthStore } = await import('./auth-store');
+        useAuthStore.getState().clearAuth();
+      } catch {
+        /* ignore */
+      }
+      throw new ApiAuthError();
+    }
     const err = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(err.message ?? 'Request failed');
   }
@@ -113,6 +134,8 @@ export function formatVisitorDisplay(user?: {
 export { MessageContent, getFileDisplayName, formatFileSize } from './message-content';
 export { ChatTranscript, type TranscriptMessage } from './chat-transcript';
 export { getFileUrl, getFileSize, decodeFileName, fixFileNameEncoding } from './file-message';
+export { setMediaTokenGetter, useAuthMediaUrl, fetchAuthMediaBlobUrl } from './auth-media';
+export { VirtualMessageList, type VirtualMessageListProps } from './virtual-message-list';
 
 export async function uploadFile(
   token: string,

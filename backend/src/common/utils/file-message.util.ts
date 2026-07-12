@@ -100,10 +100,12 @@ export function toMessageDto(message: {
   metadata?: unknown;
   createdAt: Date;
   readAt?: Date | null;
+  conversationId?: string;
 }) {
   const base = {
     id: message.id,
     sessionId: message.sessionId,
+    conversationId: message.conversationId,
     senderType: message.senderType,
     senderId: message.senderId,
     type: message.type,
@@ -112,20 +114,34 @@ export function toMessageDto(message: {
     createdAt: message.createdAt.toISOString(),
     readAt: message.readAt?.toISOString() ?? null,
   };
-  if (message.type !== 'FILE') return base;
+  if (message.type === 'TEXT' || message.type === 'SYSTEM') return base;
+
+  const fileName = resolveFileName({
+    fileName: message.fileName,
+    metadata: message.metadata,
+    content: message.content,
+  });
+  const fileSize =
+    resolveFileSize({
+      fileSize: message.fileSize,
+      metadata: message.metadata,
+    }) ?? null;
+
+  if (message.type === 'FILE') {
+    return {
+      ...base,
+      file_url: message.content,
+      file_name: fileName,
+      file_size: fileSize,
+    };
+  }
+
+  // IMAGE / VIDEO — still pass name/size when present so admin edits sync cleanly
   return {
     ...base,
     file_url: message.content,
-    file_name: resolveFileName({
-      fileName: message.fileName,
-      metadata: message.metadata,
-      content: message.content,
-    }),
-    file_size:
-      resolveFileSize({
-        fileSize: message.fileSize,
-        metadata: message.metadata,
-      }) ?? null,
+    ...(message.fileName != null ? { file_name: fileName } : {}),
+    ...(fileSize != null ? { file_size: fileSize } : {}),
   };
 }
 

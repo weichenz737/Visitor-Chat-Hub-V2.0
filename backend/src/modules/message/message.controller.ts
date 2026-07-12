@@ -33,6 +33,8 @@ export class MessageController {
       user.tenantId!,
       sessionId,
       query,
+      user.role,
+      user.sub,
     );
   }
 
@@ -66,6 +68,11 @@ export class MessageController {
   @Patch(':id/read')
   @Roles('user', 'agent')
   markRead(@CurrentUser() user: AuthPayload, @Param('id') id: string) {
-    return this.messageService.markRead(user.tenantId!, id);
+    return this.messageService.markRead(
+      user.tenantId!,
+      id,
+      user.role,
+      user.sub,
+    );
   }
 }

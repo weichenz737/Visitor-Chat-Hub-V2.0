@@ -9,6 +9,8 @@ import {
   readMetaString,
   toMessageDto,
 } from '../../common/utils/file-message.util';
+import { SessionAuthorizationService } from '../session/session-authorization.service';
+import type { AppRole } from '../../common/decorators/auth.decorator';
 
 export interface CreateMessageDto {
   sessionId: string;
@@ -26,10 +28,89 @@ export class MessageService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessionService: SessionService,
+    private readonly sessionAuthorization: SessionAuthorizationService,
     private readonly fileService: FileService,
   ) {}
 
+  private validateMessagePayload(dto: CreateMessageDto) {
+    const type = dto.type ?? 'TEXT';
+    const content = dto.content?.trim();
+    if (!content) throw new BadRequestException('消息内容不能为空');
+
+    if (content.startsWith('data:')) {
+      throw new BadRequestException('消息内容不能包含 data URI');
+    }
+    if (/;base64,/i.test(content) || /base64,/i.test(content.slice(0, 200))) {
+      throw new BadRequestException('消息内容不能包含 base64 内嵌数据');
+    }
+
+    if (type === 'TEXT') {
+      if (content.length > 10_000) {
+        throw new BadRequestException('文本消息过长');
+      }
+    } else {
+      if (content.length > 2_048) {
+        throw new BadRequestException('文件消息必须使用有效 URL');
+      }
+      try {
+        const url = new URL(content);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          throw new Error('Unsupported protocol');
+        }
+      } catch {
+        throw new BadRequestException('文件消息必须使用 HTTP(S) URL');
+      }
+    }
+
+    if (
+      dto.metadata &&
+      JSON.stringify(dto.metadata).length > 16 * 1024
+    ) {
+      throw new BadRequestException('消息 metadata 过大');
+    }
+  }
+
+  private async assertUploadedFile(
+    tenantId: string,
+    dto: CreateMessageDto,
+  ) {
+    const type = dto.type ?? 'TEXT';
+    if (type === 'TEXT') return;
+    const fileId = this.extractFileIdFromContent(dto.content);
+    const upload = await this.prisma.fileUpload.findFirst({
+      where: {
+        tenantId,
+        OR: [
+          { url: dto.content.trim() },
+          ...(fileId ? [{ id: fileId }] : []),
+        ],
+        ...(dto.senderId ? { uploaderId: dto.senderId } : {}),
+      },
+      select: { id: true },
+    });
+    if (!upload) {
+      throw new BadRequestException('文件必须先由当前账号上传');
+    }
+  }
+
+  private extractFileIdFromContent(content: string): string | null {
+    const match = content.trim().match(/\/files\/([0-9a-f-]{36})/i);
+    return match?.[1] ?? null;
+  }
+
   async create(tenantId: string, dto: CreateMessageDto) {
+    this.validateMessagePayload(dto);
+    if (dto.senderType === 'USER' || dto.senderType === 'AGENT') {
+      if (!dto.senderId) throw new BadRequestException('Missing sender');
+      await this.sessionAuthorization.assertCanSend(
+        tenantId,
+        dto.sessionId,
+        dto.senderType === 'USER' ? 'user' : 'agent',
+        dto.senderId,
+      );
+    }
+    await this.assertUploadedFile(tenantId, dto);
+
     const session = await this.sessionService.resolveSessionForMessage(
       tenantId,
       dto.sessionId,
@@ -70,15 +151,28 @@ export class MessageService {
       await this.fileService.ensureFromMessage(tenantId, message);
     }
 
-    return { message: toMessageDto(message), session };
+    return {
+      message: toMessageDto({
+        ...message,
+        conversationId: session.conversationId,
+      }),
+      session,
+    };
   }
 
   async listBySession(
     tenantId: string,
     sessionId: string,
     query: PaginationDto,
+    role: AppRole,
+    actorId: string,
   ) {
-    await this.sessionService.findById(tenantId, sessionId);
+    await this.sessionAuthorization.assertActorAccess(
+      tenantId,
+      sessionId,
+      role,
+      actorId,
+    );
     const { take, skip } = paginate(query.page, query.limit);
 
     const [items, total] = await Promise.all([
@@ -131,7 +225,7 @@ export class MessageService {
     const [items, total] = await Promise.all([
       this.prisma.message.findMany({
         where: { tenantId, sessionId: { in: sessionIds } },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { createdAt: 'desc' },
         take,
         skip,
       }),
@@ -141,7 +235,7 @@ export class MessageService {
     ]);
 
     return {
-      items: items.map((m) => toMessageDto(m)),
+      items: items.reverse().map((m) => toMessageDto(m)),
       sessions,
       total,
       page: query.page,
@@ -149,7 +243,18 @@ export class MessageService {
     };
   }
 
-  async markRead(tenantId: string, messageId: string) {
+  async markRead(
+    tenantId: string,
+    messageId: string,
+    role: AppRole,
+    actorId: string,
+  ) {
+    await this.sessionAuthorization.assertMessageAccess(
+      tenantId,
+      messageId,
+      role,
+      actorId,
+    );
     const message = await this.prisma.message.findFirst({
       where: { id: messageId, tenantId },
     });

@@ -20,6 +20,10 @@ import { CurrentUser } from '../../common/decorators/auth.decorator';
 import type { AuthPayload } from '../../common/decorators/auth.decorator';
 import { v4 as uuidv4 } from 'uuid';
 import { decodeFileName, fixFileNameEncoding } from '../../common/utils/file-message.util';
+import {
+  ALLOWED_UPLOAD_TYPES,
+  assertFileMagicMatchesExtension,
+} from '../../common/utils/upload-types';
 import { FileService } from '../file/file.service';
 
 @Controller('upload')
@@ -54,10 +58,19 @@ export class UploadController {
           cb(null, unique);
         },
       }),
+      fileFilter: (_req, file, cb) => {
+        const extension = extname(file.originalname).toLowerCase();
+        const allowedMimeTypes = ALLOWED_UPLOAD_TYPES[extension];
+        if (!allowedMimeTypes?.includes(file.mimetype)) {
+          cb(new BadRequestException('不支持的文件类型'), false);
+          return;
+        }
+        cb(null, true);
+      },
       limits: { fileSize: 20 * 1024 * 1024 },
     }),
   )
-  uploadFile(
+  async uploadFile(
     @CurrentUser() user: AuthPayload,
     @UploadedFile() file: Express.Multer.File,
     @Req() req: { body?: { file_name?: string } },
@@ -65,13 +78,18 @@ export class UploadController {
     if (!file) throw new BadRequestException('No file uploaded');
     if (!user.tenantId) throw new BadRequestException('Missing tenant');
 
+    try {
+      assertFileMagicMatchesExtension(file.path, file.originalname);
+    } catch {
+      throw new BadRequestException('文件内容与扩展名不匹配');
+    }
+
     const now = new Date();
     const relativePath = `${user.tenantId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${file.filename}`;
     const baseUrl =
       this.config.get<string>('PUBLIC_API_URL') ??
       process.env.PUBLIC_API_URL ??
       `http://localhost:${this.config.get('PORT') ?? 3000}`;
-    const fileUrl = `${baseUrl.replace(/\/$/, '')}/uploads/${relativePath}`;
     const clientName = req.body?.file_name;
     const fileName =
       decodeFileName(clientName) ??
@@ -80,25 +98,29 @@ export class UploadController {
 
     const uploaderType: MessageSenderType = user.role === 'agent' ? 'AGENT' : 'USER';
 
-    return this.fileService
-      .createRecord({
-        tenantId: user.tenantId,
-        uploaderType,
-        uploaderId: user.sub,
-        fileName,
-        fileSize: file.size,
-        mimeType: file.mimetype,
-        storagePath: relativePath,
-        url: fileUrl,
-      })
-      .then(() => ({
-        url: fileUrl,
-        file_url: fileUrl,
-        filename: fileName,
-        file_name: fileName,
-        size: file.size,
-        file_size: file.size,
-        mimeType: file.mimetype,
-      }));
+    const record = await this.fileService.createRecord({
+      tenantId: user.tenantId,
+      uploaderType,
+      uploaderId: user.sub,
+      fileName,
+      fileSize: file.size,
+      mimeType: file.mimetype,
+      storagePath: relativePath,
+      url: '',
+    });
+
+    const fileUrl = `${baseUrl.replace(/\/$/, '')}/files/${record.id}`;
+    await this.fileService.updateUrl(record.id, fileUrl);
+
+    return {
+      url: fileUrl,
+      file_url: fileUrl,
+      filename: fileName,
+      file_name: fileName,
+      size: file.size,
+      file_size: file.size,
+      mimeType: file.mimetype,
+      id: record.id,
+    };
   }
 }
