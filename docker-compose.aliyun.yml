@@ -39,7 +39,7 @@ services:
     environment:
       DATABASE_URL: postgresql://cs_user:${POSTGRES_PASSWORD:-cs_password}@postgres:5432/customer_service?schema=public
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 7d
       UPLOAD_DIR: ./uploads
       PORT: "3000"
