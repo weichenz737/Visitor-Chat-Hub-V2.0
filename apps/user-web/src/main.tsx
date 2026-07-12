@@ -1,4 +1,11 @@
-import { StrictMode, useEffect, useRef, useState } from 'react';
+import {
+  StrictMode,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
+} from 'react';
 import { createRoot } from 'react-dom/client';
 import { useChatStore } from '@cs/shared/src/store';
 import { apiFetch, MessageContent, VirtualMessageList, type Message } from '@cs/shared';
@@ -105,6 +112,7 @@ function App() {
   const [editingName, setEditingName] = useState(false);
   const [agentCode] = useState(getAgentCodeFromUrl);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const currentSession = session ?? conversation?.currentSession ?? null;
   const isClosed = currentSession?.status === 'CLOSED';
@@ -127,21 +135,46 @@ function App() {
     if (conversation) connectWs();
   }, [conversation?.id]);
 
+  // Keep layout at layout-viewport height; only pad for keyboard while input focused.
+  // Do not listen to visualViewport "scroll" — it fires while scrolling the chat and causes jitter.
   useEffect(() => {
-    const setAppHeight = () => {
-      const h = window.visualViewport?.height ?? window.innerHeight;
-      document.documentElement.style.setProperty('--app-height', `${h}px`);
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const el = document.activeElement;
+      const inputFocused =
+        el instanceof HTMLElement &&
+        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      const inset = inputFocused
+        ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+        : 0;
+      document.documentElement.style.setProperty(
+        '--keyboard-inset',
+        `${inset > 40 ? inset : 0}px`,
+      );
     };
-    setAppHeight();
-    window.visualViewport?.addEventListener('resize', setAppHeight);
-    window.visualViewport?.addEventListener('scroll', setAppHeight);
-    window.addEventListener('orientationchange', setAppHeight);
+    update();
+    vv.addEventListener('resize', update);
+    window.addEventListener('focusin', update);
+    window.addEventListener('focusout', update);
+    window.addEventListener('orientationchange', update);
     return () => {
-      window.visualViewport?.removeEventListener('resize', setAppHeight);
-      window.visualViewport?.removeEventListener('scroll', setAppHeight);
-      window.removeEventListener('orientationchange', setAppHeight);
+      vv.removeEventListener('resize', update);
+      window.removeEventListener('focusin', update);
+      window.removeEventListener('focusout', update);
+      window.removeEventListener('orientationchange', update);
     };
   }, []);
+
+  const keepInputFocus = () => {
+    requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  const preventSendBlur = (e: ReactMouseEvent | ReactTouchEvent) => {
+    e.preventDefault();
+  };
 
   const saveNickname = async () => {
     if (!auth || !nickname.trim()) return;
@@ -161,8 +194,11 @@ function App() {
 
   const handleSend = async () => {
     if (!input.trim() || !canSend) return;
-    await sendMessage(input.trim());
+    const text = input.trim();
     setInput('');
+    keepInputFocus();
+    await sendMessage(text);
+    keepInputFocus();
   };
 
   const handleEndChat = async () => {
@@ -269,13 +305,19 @@ function App() {
 
       <div className="chat-input">
         <input
+          ref={inputRef}
           type="text"
           enterKeyHint="send"
           autoComplete="off"
           autoCorrect="on"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void handleSend();
+            }
+          }}
           placeholder={isClosed ? '输入消息开始新咨询...' : '输入消息...'}
           disabled={!canSend}
         />
@@ -302,7 +344,9 @@ function App() {
         <button
           type="button"
           className="send-btn"
-          onClick={handleSend}
+          onMouseDown={preventSendBlur}
+          onTouchStart={preventSendBlur}
+          onClick={() => void handleSend()}
           disabled={!canSend || !input.trim()}
         >
           发送

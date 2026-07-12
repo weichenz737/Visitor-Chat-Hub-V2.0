@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type TouchEvent } from 'react';
 import { useChatStore } from '@cs/shared/src/store';
 import type { Message } from '@cs/shared';
 import { MessageContent, VirtualMessageList } from '@cs/shared';
@@ -41,6 +41,7 @@ export type CSWidgetOptions = {
 export function CSWidget({ apiKey = API_KEY, slug }: { apiKey?: string; slug?: string }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const {
     auth,
@@ -74,6 +75,25 @@ export function CSWidget({ apiKey = API_KEY, slug }: { apiKey?: string; slug?: s
     }
   }, [session?.id, open]);
 
+  const keepInputFocus = () => {
+    requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  const preventSendBlur = (e: MouseEvent | TouchEvent) => {
+    e.preventDefault();
+  };
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+    const text = input.trim();
+    setInput('');
+    keepInputFocus();
+    await sendMessage(text);
+    keepInputFocus();
+  };
+
   return (
     <>
       <button className="widget-fab" onClick={() => setOpen(!open)}>
@@ -101,23 +121,22 @@ export function CSWidget({ apiKey = API_KEY, slug }: { apiKey?: string; slug?: s
           </div>
           <div className="chat-input">
             <input
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={async (e) => {
-                if (e.key === 'Enter' && input.trim()) {
-                  await sendMessage(input.trim());
-                  setInput('');
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleSend();
                 }
               }}
               placeholder="输入消息..."
             />
             <button
-              onClick={async () => {
-                if (input.trim()) {
-                  await sendMessage(input.trim());
-                  setInput('');
-                }
-              }}
+              type="button"
+              onMouseDown={preventSendBlur}
+              onTouchStart={preventSendBlur}
+              onClick={() => void handleSend()}
             >
               发送
             </button>

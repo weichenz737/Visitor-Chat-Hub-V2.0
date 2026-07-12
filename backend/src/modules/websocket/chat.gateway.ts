@@ -251,6 +251,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return { ok: true };
   }
 
+  @SubscribeMessage('leave_session')
+  handleLeaveSession(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: { sessionId: string },
+  ) {
+    const user = socket.data.user as WsAuthPayload;
+    if (!user?.tenantId || !body?.sessionId) return { error: 'Unauthorized' };
+    socket.leave(this.roomName(user.tenantId, body.sessionId));
+    return { ok: true };
+  }
+
   @SubscribeMessage('message')
   async handleMessage(
     @ConnectedSocket() socket: Socket,

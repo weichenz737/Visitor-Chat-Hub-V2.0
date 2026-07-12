@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { Message } from './index';
 import {
   formatFileSize,
@@ -66,18 +67,85 @@ function FileMessageCard({ msg }: { msg: Message }) {
   );
 }
 
+function notifyMediaLoaded() {
+  window.dispatchEvent(new CustomEvent('cs-chat-media-loaded'));
+}
+
+/** Fetch auth media only after the slot is near the viewport. */
+function useNearViewport(rootMargin = '240px') {
+  const ref = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(false);
+
+  useEffect(() => {
+    if (near) return;
+    const el = ref.current;
+    if (!el) return;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setNear(true);
+      return;
+    }
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setNear(true);
+          io.disconnect();
+        }
+      },
+      { root: null, rootMargin, threshold: 0.01 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near, rootMargin]);
+
+  return { ref, near };
+}
+
 function AuthImage({ url, alt }: { url: string; alt: string }) {
-  const { src, loading, error } = useAuthMediaUrl(url);
-  if (error) return <span className="media-error">图片加载失败</span>;
-  if (loading || !src) return <span className="media-loading">加载中…</span>;
-  return <img src={src} alt={alt} loading="lazy" />;
+  const { ref, near } = useNearViewport();
+  const { src, loading, error } = useAuthMediaUrl(near ? url : null);
+
+  return (
+    <div ref={ref} className="media-lazy-slot">
+      {error ? (
+        <span className="media-error">图片加载失败</span>
+      ) : !near || loading || !src ? (
+        <span className="media-loading">加载中…</span>
+      ) : (
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          onLoad={notifyMediaLoaded}
+        />
+      )}
+    </div>
+  );
 }
 
 function AuthVideo({ url }: { url: string }) {
-  const { src, loading, error } = useAuthMediaUrl(url);
-  if (error) return <span className="media-error">视频加载失败</span>;
-  if (loading || !src) return <span className="media-loading">加载中…</span>;
-  return <video src={src} controls preload="metadata" playsInline />;
+  const { ref, near } = useNearViewport();
+  const { src, loading, error } = useAuthMediaUrl(near ? url : null);
+
+  return (
+    <div ref={ref} className="media-lazy-slot">
+      {error ? (
+        <span className="media-error">视频加载失败</span>
+      ) : !near || loading || !src ? (
+        <span className="media-loading">加载中…</span>
+      ) : (
+        <video
+          src={src}
+          controls
+          preload="metadata"
+          playsInline
+          onLoadedMetadata={notifyMediaLoaded}
+        />
+      )}
+    </div>
+  );
 }
 
 export function MessageContent({ msg }: { msg: Message }) {

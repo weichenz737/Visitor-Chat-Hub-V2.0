@@ -135,7 +135,7 @@ export { MessageContent, getFileDisplayName, formatFileSize } from './message-co
 export { ChatTranscript, type TranscriptMessage } from './chat-transcript';
 export { getFileUrl, getFileSize, decodeFileName, fixFileNameEncoding } from './file-message';
 export { setMediaTokenGetter, useAuthMediaUrl, fetchAuthMediaBlobUrl } from './auth-media';
-export { VirtualMessageList, type VirtualMessageListProps } from './virtual-message-list';
+export { VirtualMessageList, type VirtualMessageListProps, type VirtualMessageListHandle } from './virtual-message-list';
 
 export async function uploadFile(
   token: string,

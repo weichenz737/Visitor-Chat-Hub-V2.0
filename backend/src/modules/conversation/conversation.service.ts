@@ -92,9 +92,14 @@ export class ConversationService {
     const { take, skip } = paginate(query.page, query.limit);
     const showArchived = query.archived === '1' || query.archived === 'true';
 
-    const agentAccessFilter = {
+    // Active inbox: only open sessions assigned to me (or claimable waiting).
+    // Do NOT match historical CLOSED sessions — otherwise transferred visitors stay visible.
+    const openAgentAccessFilter = {
       OR: [
-        { agentId },
+        {
+          agentId,
+          status: { in: ['WAITING' as const, 'ACTIVE' as const] },
+        },
         {
           status: 'WAITING' as const,
           agentId: null,
@@ -106,18 +111,18 @@ export class ConversationService {
       ],
     };
 
-    const where = {
-      tenantId,
-      sessions: {
-        some: {
-          status: { not: 'REMOVED' as const },
-          ...agentAccessFilter,
-        },
-      },
-      ...(showArchived
-        ? { agentArchives: { some: { agentId } } }
-        : { agentArchives: { none: { agentId } } }),
-    };
+    const where = showArchived
+      ? {
+          tenantId,
+          agentArchives: { some: { agentId } },
+          sessions: { some: { status: { not: 'REMOVED' as const } } },
+        }
+      : {
+          tenantId,
+          sessions: { some: openAgentAccessFilter },
+          agentArchives: { none: { agentId } },
+        };
+
     const conversations = await this.prisma.conversation.findMany({
       where,
       include: {
@@ -138,16 +143,29 @@ export class ConversationService {
 
     const total = await this.prisma.conversation.count({ where });
 
+    const isAccessibleSession = (s: {
+      agentId: string | null;
+      status: string;
+      preferredAgentId?: string | null;
+    }) => {
+      if (showArchived) {
+        return (
+          s.agentId === agentId ||
+          (s.status === 'WAITING' &&
+            !s.agentId &&
+            (!s.preferredAgentId || s.preferredAgentId === agentId))
+        );
+      }
+      return (
+        (s.agentId === agentId && (s.status === 'WAITING' || s.status === 'ACTIVE')) ||
+        (s.status === 'WAITING' &&
+          !s.agentId &&
+          (!s.preferredAgentId || s.preferredAgentId === agentId))
+      );
+    };
+
     const accessibleSessionIds = conversations.flatMap((conv) =>
-      conv.sessions
-        .filter(
-          (s) =>
-            s.agentId === agentId ||
-            (s.status === 'WAITING' &&
-              !s.agentId &&
-              (!s.preferredAgentId || s.preferredAgentId === agentId)),
-        )
-        .map((s) => s.id),
+      conv.sessions.filter(isAccessibleSession).map((s) => s.id),
     );
     const unreadBySession = new Map<string, number>();
     if (accessibleSessionIds.length) {
@@ -167,13 +185,7 @@ export class ConversationService {
     }
 
     const items = conversations.map((conv) => {
-      const accessibleSessions = conv.sessions.filter(
-        (s) =>
-          s.agentId === agentId ||
-          (s.status === 'WAITING' &&
-            !s.agentId &&
-            (!s.preferredAgentId || s.preferredAgentId === agentId)),
-      );
+      const accessibleSessions = conv.sessions.filter(isAccessibleSession);
       const openSession = accessibleSessions.find(
         (s) => s.status === 'WAITING' || s.status === 'ACTIVE',
       );
@@ -222,7 +234,10 @@ export class ConversationService {
         conversationId,
         tenantId,
         OR: [
-          { agentId },
+          {
+            agentId,
+            status: { in: ['WAITING', 'ACTIVE'] },
+          },
           {
             status: 'WAITING',
             agentId: null,
@@ -234,10 +249,15 @@ export class ConversationService {
         ],
       },
     });
-    if (!accessible) {
-      throw new ForbiddenException('无权查看此会话');
-    }
-    return conversation;
+    if (accessible) return conversation;
+
+    // Archived inbox may still open past conversations.
+    const archived = await this.prisma.conversationAgentArchive.findFirst({
+      where: { tenantId, conversationId, agentId },
+    });
+    if (archived) return conversation;
+
+    throw new ForbiddenException('无权查看此会话');
   }
 
   async markConversationRead(

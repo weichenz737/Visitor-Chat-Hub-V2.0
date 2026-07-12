@@ -228,6 +228,27 @@ input:focus, textarea:focus {
   border-radius: 8px;
 }
 
+.media-lazy-slot {
+  min-width: 120px;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-loading,
+.media-error {
+  display: inline-block;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #64748b;
+}
+
+.media-error {
+  color: #dc2626;
+}
+
 .message-bubble--file {
   padding: 0;
   background: transparent !important;

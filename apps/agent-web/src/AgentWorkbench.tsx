@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useRef, useState, type MouseEvent, type ReactNode, type TouchEvent } from 'react';
 import { useChatStore } from '@cs/shared/src/store';
 import {
   apiFetch,
@@ -9,6 +9,7 @@ import {
   type AgentStatus,
   type Conversation,
   type Message,
+  type VirtualMessageListHandle,
 } from '@cs/shared';
 import { AgentHeader } from './AgentHeader';
 import { UserPanel } from './UserPanel';
@@ -195,27 +196,30 @@ function QuickReplyManager({
   );
 }
 
-function ConversationMessages({
-  messages,
-  firstItemIndex,
-  hasMore,
-  loadingOlder,
-  onLoadOlder,
-}: {
-  messages: Message[];
-  firstItemIndex: number;
-  hasMore: boolean;
-  loadingOlder?: boolean;
-  onLoadOlder: () => void;
-}) {
+const ConversationMessages = forwardRef<
+  VirtualMessageListHandle,
+  {
+    messages: Message[];
+    firstItemIndex: number;
+    hasMore: boolean;
+    loadingOlder?: boolean;
+    onLoadOlder: () => void;
+    onAtBottomChange?: (atBottom: boolean) => void;
+  }
+>(function ConversationMessages(
+  { messages, firstItemIndex, hasMore, loadingOlder, onLoadOlder, onAtBottomChange },
+  ref,
+) {
   return (
     <VirtualMessageList
+      ref={ref}
       className="message-list-virtuoso"
       messages={messages}
       firstItemIndex={firstItemIndex}
       hasMore={hasMore}
       loadingOlder={loadingOlder}
       onLoadOlder={onLoadOlder}
+      onAtBottomChange={onAtBottomChange}
       renderMessage={(msg, i) => {
         const prev = messages[i - 1];
         const showDivider = prev && prev.sessionId !== msg.sessionId;
@@ -228,7 +232,7 @@ function ConversationMessages({
       }}
     />
   );
-}
+});
 
 function MessageItem({ msg }: { msg: Message }) {
   if (msg.senderType === 'SYSTEM') {
@@ -389,7 +393,15 @@ export default function AgentWorkbench() {
   const [allowAgentTransfer, setAllowAgentTransfer] = useState(true);
   const [onlineAgents, setOnlineAgents] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [inboxTab, setInboxTab] = useState<'active' | 'archived'>('active');
+  const [atBottom, setAtBottom] = useState(true);
+  const [hasNewWhileAway, setHasNewWhileAway] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<VirtualMessageListHandle>(null);
+  const atBottomRef = useRef(true);
+  const lastMessageIdRef = useRef<string | null>(null);
+  const agentAppRef = useRef<HTMLDivElement>(null);
 
   const loadQuickReplies = () => {
     if (!auth) return;
@@ -457,6 +469,84 @@ export default function AgentWorkbench() {
     }
     if (!conversation) setMobileView('inbox');
   }, [isMobile, conversation]);
+
+  useEffect(() => {
+    atBottomRef.current = true;
+    setAtBottom(true);
+    setHasNewWhileAway(false);
+    lastMessageIdRef.current = null;
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    const lastId = last?.id ?? null;
+    if (!lastId) {
+      lastMessageIdRef.current = null;
+      return;
+    }
+    // Only visitor messages warrant the "有新消息" tip; own/agent sends do not.
+    if (
+      lastMessageIdRef.current &&
+      lastId !== lastMessageIdRef.current &&
+      !atBottomRef.current &&
+      last.senderType === 'USER'
+    ) {
+      setHasNewWhileAway(true);
+    }
+    lastMessageIdRef.current = lastId;
+  }, [messages]);
+
+  useEffect(() => {
+    if (!isMobile) {
+      setKeyboardInset(0);
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    // Avoid visualViewport "scroll" — it fires during chat scroll on iOS and jitters layout.
+    const update = () => {
+      const el = document.activeElement;
+      const inputFocused =
+        el instanceof HTMLElement &&
+        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      const inset = inputFocused
+        ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+        : 0;
+      setKeyboardInset(inset > 40 ? inset : 0);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    window.addEventListener('focusin', update);
+    window.addEventListener('focusout', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      window.removeEventListener('focusin', update);
+      window.removeEventListener('focusout', update);
+    };
+  }, [isMobile]);
+
+  const handleAtBottomChange = (value: boolean) => {
+    atBottomRef.current = value;
+    setAtBottom(value);
+    if (value) setHasNewWhileAway(false);
+  };
+
+  const jumpToLatest = () => {
+    listRef.current?.scrollToBottom('smooth');
+    setHasNewWhileAway(false);
+    atBottomRef.current = true;
+    setAtBottom(true);
+  };
+
+  const keepInputFocus = () => {
+    requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  const preventSendBlur = (e: MouseEvent | TouchEvent) => {
+    e.preventDefault();
+  };
 
   const clearConversation = () => {
     useChatStore.setState({ conversation: null, session: null, messages: [] });
@@ -537,6 +627,19 @@ export default function AgentWorkbench() {
   const isClosed = currentSession?.status === 'CLOSED';
   const canChat = currentSession && !isClosed && currentSession.status === 'ACTIVE';
 
+  const handleSendText = async () => {
+    if (!canChat || !input.trim()) return;
+    const text = input.trim();
+    setInput('');
+    jumpToLatest();
+    keepInputFocus();
+    try {
+      await sendMessage(text);
+    } finally {
+      keepInputFocus();
+    }
+  };
+
   const handleLogout = () => {
     disconnectWs();
     logout();
@@ -545,6 +648,11 @@ export default function AgentWorkbench() {
   const handlePasswordChanged = () => handleLogout();
 
   const visitor = conversation ? formatVisitorDisplay(conversation.user) : null;
+
+  const inboxUnreadTotal = Object.entries(unreadByConversation).reduce((sum, [id, n]) => {
+    if (conversation?.id && id === conversation.id) return sum;
+    return sum + (n || 0);
+  }, 0);
 
   const panelContent = auth && (
     <>
@@ -562,9 +670,24 @@ export default function AgentWorkbench() {
         currentSession={currentSession}
         authToken={auth.token}
         onTransferred={() => {
-          loadConversations(inboxTab === 'archived');
+          const convId = conversation?.id;
+          const sessionId = currentSession?.id;
+          useChatStore.setState((state) => {
+            const conversations = state.conversations.filter(
+              (c) =>
+                (!convId || c.id !== convId) &&
+                (!sessionId || c.currentSession?.id !== sessionId),
+            );
+            const unreadByConversation = { ...state.unreadByConversation };
+            if (convId) delete unreadByConversation[convId];
+            return { conversations, unreadByConversation };
+          });
+          if (sessionId) {
+            useChatStore.getState().socket?.emit('leave_session', { sessionId });
+          }
+          clearConversation();
+          void loadConversations(inboxTab === 'archived');
           loadOnlineAgents();
-          setDetailOpen(false);
         }}
       />
     </>
@@ -578,7 +701,11 @@ export default function AgentWorkbench() {
   ].filter(Boolean).join(' ');
 
   return (
-    <div className="agent-app">
+    <div
+      className="agent-app"
+      ref={agentAppRef}
+      style={isMobile ? { ['--keyboard-inset' as string]: `${keyboardInset}px` } : undefined}
+    >
       {auth && (
         <AgentHeader
           token={auth.token}
@@ -698,7 +825,12 @@ export default function AgentWorkbench() {
               </div>
 
               <div className="mobile-chat-header mobile-only">
-                <button type="button" className="icon-btn" aria-label="返回会话列表" onClick={backToInbox}>←</button>
+                <button type="button" className="icon-btn back-inbox-btn" aria-label="返回会话列表" onClick={backToInbox}>
+                  ←
+                  {inboxUnreadTotal > 0 && (
+                    <span className="back-unread-badge">{inboxUnreadTotal > 99 ? '99+' : inboxUnreadTotal}</span>
+                  )}
+                </button>
                 <div className="mobile-chat-header-center">
                   <div className="mobile-chat-title">{visitor?.name ?? '会话'}</div>
                   <div className="mobile-chat-sub">
@@ -715,15 +847,23 @@ export default function AgentWorkbench() {
               <div className="message-list">
                 <ConversationMessages
                   key={conversation.id}
+                  ref={listRef}
                   messages={messages}
                   firstItemIndex={messagesFirstItemIndex}
                   hasMore={messagesHasMore}
                   loadingOlder={messagesLoadingOlder}
                   onLoadOlder={() => void loadOlderMessages()}
+                  onAtBottomChange={handleAtBottomChange}
                 />
               </div>
 
               {sendError && <div className="error-banner">{sendError}</div>}
+
+              {isMobile && hasNewWhileAway && !atBottom && (
+                <button type="button" className="new-message-tip" onClick={jumpToLatest}>
+                  有新消息
+                </button>
+              )}
 
               <div className="quick-replies">
                 {canChat && quickReplies.map((qr) => (
@@ -733,9 +873,15 @@ export default function AgentWorkbench() {
 
               <div className="chat-input">
                 <input
+                  ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && canChat && sendMessage(input.trim()).then(() => setInput(''))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void handleSendText();
+                    }
+                  }}
                   placeholder={isClosed ? '会话已结束' : '输入回复...'}
                   disabled={!canChat}
                 />
@@ -745,16 +891,27 @@ export default function AgentWorkbench() {
                   hidden
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f && canChat) sendFile(f);
+                    if (f && canChat) {
+                      jumpToLatest();
+                      void sendFile(f);
+                    }
                     e.target.value = '';
                   }}
                 />
-                <button type="button" onClick={() => fileRef.current?.click()} disabled={!canChat}>📎</button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (canChat && input.trim()) sendMessage(input.trim()).then(() => setInput(''));
-                  }}
+                  onMouseDown={preventSendBlur}
+                  onTouchStart={preventSendBlur}
+                  onClick={() => fileRef.current?.click()}
+                  disabled={!canChat}
+                >
+                  📎
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={preventSendBlur}
+                  onTouchStart={preventSendBlur}
+                  onClick={() => void handleSendText()}
                   disabled={!canChat}
                 >
                   发送

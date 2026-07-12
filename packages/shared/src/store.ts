@@ -670,12 +670,57 @@ export const useChatStore = create<ChatStore>((set, get) => {
     });
 
     s.on('transfer_session', (data: { session: Session }) => {
+      const { auth } = get();
+      if (auth?.role === 'agent') {
+        const assignedToMe = data.session.agentId === auth.userId;
+        if (!assignedToMe) {
+          // Transferred away: drop from inbox and leave the open chat.
+          const sessionId = data.session.id;
+          const conversationId = data.session.conversationId;
+          set((state) => {
+            const conversations = state.conversations.filter(
+              (c) =>
+                c.currentSession?.id !== sessionId &&
+                (!conversationId || c.id !== conversationId),
+            );
+            const selected =
+              state.session?.id === sessionId ||
+              state.conversation?.currentSession?.id === sessionId ||
+              (!!conversationId && state.conversation?.id === conversationId);
+            if (!selected) {
+              const unreadByConversation = { ...state.unreadByConversation };
+              if (conversationId) delete unreadByConversation[conversationId];
+              return { conversations, unreadByConversation };
+            }
+            const unreadByConversation = { ...state.unreadByConversation };
+            if (state.conversation?.id) delete unreadByConversation[state.conversation.id];
+            if (conversationId) delete unreadByConversation[conversationId];
+            return {
+              conversations,
+              conversation: null,
+              session: null,
+              messages: [],
+              messagesPage: 1,
+              messagesHasMore: false,
+              unreadByConversation,
+            };
+          });
+          get().socket?.emit('leave_session', { sessionId });
+          queueMicrotask(() => get().loadConversations());
+          return;
+        }
+        // Received this transfer — refresh inbox so the visitor appears.
+        queueMicrotask(() => get().loadConversations());
+        return;
+      }
+
       set((state) => {
         const session =
           state.session?.id === data.session.id ? data.session : state.session;
-        const conversation = state.conversation?.currentSession?.id === data.session.id
-          ? { ...state.conversation, currentSession: data.session }
-          : state.conversation;
+        const conversation =
+          state.conversation?.currentSession?.id === data.session.id
+            ? { ...state.conversation, currentSession: data.session }
+            : state.conversation;
         const conversations = state.conversations.map((c) =>
           c.currentSession?.id === data.session.id
             ? { ...c, currentSession: data.session }
@@ -953,7 +998,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const refreshed = selectedId
           ? conversations.find((c) => c.id === selectedId)
           : null;
-        const nextSession = refreshed?.currentSession ?? state.session;
+        const lostSelection = !!selectedId && !refreshed;
+        const nextSession = refreshed?.currentSession ?? (lostSelection ? null : state.session);
         const sessionChanged =
           !!refreshed?.currentSession?.id &&
           refreshed.currentSession.id !==
@@ -965,19 +1011,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
             });
           });
         }
+        if (lostSelection && state.session?.id) {
+          const leaveId = state.session.id;
+          queueMicrotask(() => {
+            get().socket?.emit('leave_session', { sessionId: leaveId });
+          });
+        }
+        const unreadByConversation = mergeUnreadFromConversations(
+          conversations,
+          refreshed?.id,
+        );
         return {
           conversations,
           conversationsPage: page,
           conversationsHasMore: page * limit < total,
           conversationsLoadingMore: false,
-          unreadByConversation: mergeUnreadFromConversations(
-            conversations,
-            state.conversation?.id,
-          ),
+          unreadByConversation,
           conversation: refreshed
             ? { ...refreshed, currentSession: refreshed.currentSession }
-            : state.conversation,
-          session: refreshed ? nextSession : state.session,
+            : lostSelection
+              ? null
+              : state.conversation,
+          session: refreshed ? nextSession : lostSelection ? null : state.session,
+          messages: lostSelection ? [] : state.messages,
         };
       });
     } catch (e) {
