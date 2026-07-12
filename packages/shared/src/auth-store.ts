@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 const API_BASE = import.meta.env?.VITE_API_URL ?? 'http://localhost:3000';
+const AUTH_SESSION_KEY = 'cs.auth.session';
 
 type UserRole = 'user' | 'agent' | 'tenant_admin' | 'platform_admin';
 type StaffRole = 'TENANT_ADMIN' | 'SUPERVISOR' | 'AGENT';
@@ -17,6 +18,30 @@ interface AuthState {
   agentCode?: string;
   agentStatus?: AgentStatus;
   phone?: string;
+}
+
+function loadAuthSession(): AuthState | null {
+  try {
+    const raw = localStorage.getItem(AUTH_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AuthState;
+    if (!parsed?.token || !parsed?.role || !parsed?.userId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveAuthSession(auth: AuthState | null) {
+  try {
+    if (!auth) {
+      localStorage.removeItem(AUTH_SESSION_KEY);
+      return;
+    }
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(auth));
+  } catch {
+    // ignore quota / private mode
+  }
 }
 
 async function authFetch<T>(
@@ -54,8 +79,13 @@ interface AuthStore {
   clearAuth: () => void;
 }
 
+function setAuth(set: (partial: Partial<AuthStore>) => void, auth: AuthState) {
+  saveAuthSession(auth);
+  set({ auth, loading: false, error: null });
+}
+
 export const useAuthStore = create<AuthStore>((set, get) => ({
-  auth: null,
+  auth: loadAuthSession(),
   loading: false,
   error: null,
 
@@ -77,20 +107,17 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         method: 'POST',
         body: JSON.stringify({ email: account, password, tenantCode }),
       });
-      set({
-        auth: {
-          token: data.accessToken,
-          role: 'agent',
-          tenantId: data.agent.tenantCode,
-          tenantCode: data.agent.tenantCode,
-          staffRole: 'AGENT',
-          userId: data.agent.id,
-          name: data.agent.name,
-          agentCode: data.agent.agentCode,
-          agentStatus: (data.agent.status as AgentStatus) ?? 'OFFLINE',
-          phone: data.agent.phone,
-        },
-        loading: false,
+      setAuth(set, {
+        token: data.accessToken,
+        role: 'agent',
+        tenantId: data.agent.tenantCode,
+        tenantCode: data.agent.tenantCode,
+        staffRole: 'AGENT',
+        userId: data.agent.id,
+        name: data.agent.name,
+        agentCode: data.agent.agentCode,
+        agentStatus: (data.agent.status as AgentStatus) ?? 'OFFLINE',
+        phone: data.agent.phone,
       });
     } catch (e) {
       set({ loading: false, error: (e as Error).message });
@@ -114,17 +141,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         method: 'POST',
         body: JSON.stringify({ email: account, password, tenantCode }),
       });
-      set({
-        auth: {
-          token: data.accessToken,
-          role: 'tenant_admin',
-          tenantId: data.user.tenantCode,
-          tenantCode: data.user.tenantCode,
-          staffRole: data.user.staffRole,
-          userId: data.user.id,
-          name: data.user.name,
-        },
-        loading: false,
+      setAuth(set, {
+        token: data.accessToken,
+        role: 'tenant_admin',
+        tenantId: data.user.tenantCode,
+        tenantCode: data.user.tenantCode,
+        staffRole: data.user.staffRole,
+        userId: data.user.id,
+        name: data.user.name,
       });
     } catch (e) {
       set({ loading: false, error: (e as Error).message });
@@ -142,14 +166,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
-      set({
-        auth: {
-          token: data.accessToken,
-          role: 'platform_admin',
-          userId: data.admin.id,
-          name: data.admin.name,
-        },
-        loading: false,
+      setAuth(set, {
+        token: data.accessToken,
+        role: 'platform_admin',
+        userId: data.admin.id,
+        name: data.admin.name,
       });
     } catch (e) {
       set({ loading: false, error: (e as Error).message });
@@ -159,5 +180,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
   loginAdmin: async (email, password) => get().loginPlatformAdmin(email, password),
 
-  clearAuth: () => set({ auth: null, loading: false, error: null }),
+  clearAuth: () => {
+    saveAuthSession(null);
+    set({ auth: null, loading: false, error: null });
+  },
 }));

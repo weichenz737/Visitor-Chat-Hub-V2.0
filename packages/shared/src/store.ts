@@ -886,10 +886,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const limit = data.limit ?? MESSAGE_PAGE_SIZE;
       const total = data.total ?? 0;
       set({
-        messages: [...older, ...messages],
+        messages: older.length ? [...older, ...messages] : messages,
         messagesPage: nextPage,
-        messagesHasMore: nextPage * limit < total,
-        messagesFirstItemIndex: messagesFirstItemIndex - older.length,
+        // Stop paging if this page contributed nothing (avoids Virtuoso startReached loops).
+        messagesHasMore: older.length > 0 && nextPage * limit < total,
+        messagesFirstItemIndex:
+          older.length > 0 ? messagesFirstItemIndex - older.length : messagesFirstItemIndex,
         messagesLoadingOlder: false,
       });
     } catch {
@@ -1032,15 +1034,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
     const { auth } = get();
     if (!auth) return;
     let currentSession = conv.currentSession ?? null;
-    if (currentSession?.status === 'WAITING') {
-      currentSession = await apiFetch<Session>(`/sessions/${currentSession.id}/assign`, {
-        method: 'PATCH',
-        token: auth.token,
-        body: JSON.stringify({}),
-      });
-    }
     const unreadByConversation = { ...get().unreadByConversation };
     delete unreadByConversation[conv.id];
+    // Show conversation immediately (important on mobile before assign/messages finish).
     set({
       conversation: { ...conv, currentSession },
       session: currentSession,
@@ -1050,6 +1046,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
       messagesHasMore: false,
       messagesFirstItemIndex: FIRST_ITEM_INDEX_BASE,
     });
+    if (currentSession?.status === 'WAITING') {
+      currentSession = await apiFetch<Session>(`/sessions/${currentSession.id}/assign`, {
+        method: 'PATCH',
+        token: auth.token,
+        body: JSON.stringify({}),
+      });
+      set({
+        conversation: { ...conv, currentSession },
+        session: currentSession,
+      });
+    }
     if (currentSession && currentSession.status !== 'CLOSED' && currentSession.status !== 'REMOVED') {
       get().socket?.emit('join_session', { sessionId: currentSession.id });
     }
@@ -1165,6 +1172,11 @@ useAuthStore.subscribe((state, prev) => {
       unreadByConversation: {},
     });
   }
+});
+
+// Hydrate chat store once on boot (subscribe does not fire for initial state).
+useChatStore.setState({
+  auth: useAuthStore.getState().auth,
 });
 
 setMediaTokenGetter(

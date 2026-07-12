@@ -1,12 +1,28 @@
-import { useState } from 'react';
-import { Button, Card, Form, Input, Typography, message } from 'antd';
+import { useEffect, useState } from 'react';
+import { Button, Card, Checkbox, Form, Input, Typography, message } from 'antd';
 import { useAuthStore } from '@cs/shared/src/auth-store';
+import {
+  clearRememberedLogin,
+  loadRememberedLogin,
+  saveRememberedLogin,
+} from '@cs/shared/src/remember-login';
 import { accountRules } from '../utils/account';
 
 export default function LoginPage() {
   const { loginPlatformAdmin, loading } = useAuthStore();
   const [form] = Form.useForm();
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const saved = loadRememberedLogin('platform');
+    if (saved) {
+      form.setFieldsValue({
+        email: saved.account,
+        password: saved.password,
+        remember: true,
+      });
+    }
+  }, [form]);
 
   return (
     <div style={{
@@ -30,11 +46,19 @@ export default function LoginPage() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ email: 'admin@example.com', password: 'admin123' }}
+          initialValues={{ email: '', password: '', remember: false }}
           onFinish={async (values) => {
             setError('');
             try {
               await loginPlatformAdmin(values.email, values.password);
+              if (values.remember) {
+                saveRememberedLogin('platform', {
+                  account: values.email,
+                  password: values.password,
+                });
+              } else {
+                clearRememberedLogin('platform');
+              }
               message.success('登录成功');
             } catch (e) {
               setError((e as Error).message);
@@ -42,10 +66,13 @@ export default function LoginPage() {
           }}
         >
           <Form.Item name="email" label="账号" rules={accountRules}>
-            <Input size="large" />
+            <Input size="large" autoComplete="username" />
           </Form.Item>
           <Form.Item name="password" label="密码" rules={[{ required: true }]}>
-            <Input.Password size="large" />
+            <Input.Password size="large" autoComplete="current-password" />
+          </Form.Item>
+          <Form.Item name="remember" valuePropName="checked">
+            <Checkbox>记住密码</Checkbox>
           </Form.Item>
           {error && <Typography.Text type="danger">{error}</Typography.Text>}
           <Form.Item>

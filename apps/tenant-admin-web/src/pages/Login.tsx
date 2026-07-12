@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, Form, Input, Typography, message } from 'antd';
+import { Button, Card, Checkbox, Form, Input, Typography, message } from 'antd';
 import { useAuthStore } from '@cs/shared/src/auth-store';
+import {
+  clearRememberedLogin,
+  loadLastTenantCode,
+  loadRememberedLogin,
+  saveLastTenantCode,
+  saveRememberedLogin,
+} from '@cs/shared/src/remember-login';
 import { accountRules } from '../utils/account';
 
 export default function LoginPage() {
@@ -13,6 +20,21 @@ export default function LoginPage() {
   useEffect(() => {
     if (auth?.role === 'tenant_admin') navigate('/', { replace: true });
   }, [auth, navigate]);
+
+  useEffect(() => {
+    const saved = loadRememberedLogin('tenant');
+    const lastTenant = loadLastTenantCode('tenant');
+    if (saved) {
+      form.setFieldsValue({
+        email: saved.account,
+        password: saved.password,
+        tenantCode: saved.tenantCode || lastTenant || '',
+        remember: true,
+      });
+    } else if (lastTenant) {
+      form.setFieldsValue({ tenantCode: lastTenant });
+    }
+  }, [form]);
 
   return (
     <div style={{
@@ -32,11 +54,21 @@ export default function LoginPage() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ email: 'admin@demo.com', password: 'agent123', tenantCode: 'demo001' }}
+          initialValues={{ email: '', password: '', tenantCode: '', remember: false }}
           onFinish={async (values) => {
             setError('');
             try {
               await loginTenantAdmin(values.email, values.password, values.tenantCode);
+              saveLastTenantCode('tenant', values.tenantCode);
+              if (values.remember) {
+                saveRememberedLogin('tenant', {
+                  account: values.email,
+                  password: values.password,
+                  tenantCode: values.tenantCode,
+                });
+              } else {
+                clearRememberedLogin('tenant');
+              }
               message.success('登录成功');
               navigate('/', { replace: true });
             } catch (e) {
@@ -45,13 +77,16 @@ export default function LoginPage() {
           }}
         >
           <Form.Item name="tenantCode" label="企业编码" rules={[{ required: true }]}>
-            <Input size="large" placeholder="demo001" />
+            <Input size="large" placeholder="请输入企业编码" autoComplete="organization" />
           </Form.Item>
           <Form.Item name="email" label="账号" rules={accountRules}>
-            <Input size="large" />
+            <Input size="large" autoComplete="username" />
           </Form.Item>
           <Form.Item name="password" label="密码" rules={[{ required: true }]}>
-            <Input.Password size="large" />
+            <Input.Password size="large" autoComplete="current-password" />
+          </Form.Item>
+          <Form.Item name="remember" valuePropName="checked">
+            <Checkbox>记住密码</Checkbox>
           </Form.Item>
           {error && <Typography.Text type="danger">{error}</Typography.Text>}
           <Form.Item>

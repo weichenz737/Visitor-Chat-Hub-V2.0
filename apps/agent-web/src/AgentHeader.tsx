@@ -177,6 +177,15 @@ export function AgentHeader({
         <button type="button" className="menu-btn" onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); setStatusOpen(false); }}>☰</button>
         {menuOpen && (
           <div className="dropdown-menu profile-menu">
+            {stats && (
+              <div className="agent-stats-menu">
+                <div className="dropdown-stats">
+                  <span>今日接待 {stats.todaySessions}</span>
+                  <span>当前 {stats.activeSessions}</span>
+                  <span>今日消息 {stats.todayMessages}</span>
+                </div>
+              </div>
+            )}
             <button type="button" className="dropdown-item" onClick={openProfile}>个人资料</button>
             <button type="button" className="dropdown-item" onClick={() => { setMenuOpen(false); setModal('password'); }}>修改密码</button>
             <button type="button" className="dropdown-item" onClick={openShare}>我的专属链接</button>

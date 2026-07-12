@@ -5,11 +5,13 @@ const prisma = new PrismaClient();
 
 async function main() {
   const adminPassword = await bcrypt.hash('admin123', 10);
+  // Replace legacy seed account if present
+  await prisma.platformAdmin.deleteMany({ where: { email: 'admin@example.com' } });
   const admin = await prisma.platformAdmin.upsert({
-    where: { email: 'admin@example.com' },
-    update: {},
+    where: { email: 'admin' },
+    update: { password: adminPassword, name: '系统管理员' },
     create: {
-      email: 'admin@example.com',
+      email: 'admin',
       password: adminPassword,
       name: '系统管理员',
     },
@@ -17,13 +19,13 @@ async function main() {
 
   const tenant = await prisma.tenant.upsert({
     where: { slug: 'demo' },
-    update: { tenantCode: 'demo001' },
+    update: { tenantCode: 'demo001', adminEmail: 'demo' },
     create: {
       tenantCode: 'demo001',
       name: '演示企业',
       slug: 'demo',
       apiKey: 'cs_demo_api_key_12345',
-      adminEmail: 'admin@demo.com',
+      adminEmail: 'demo',
       contactName: '张经理',
       contactPhone: '13800138000',
       remark: '演示租户',
@@ -32,17 +34,27 @@ async function main() {
   });
 
   const agentPassword = await bcrypt.hash('agent123', 10);
+  const tenantAdminPassword = await bcrypt.hash('123456', 10);
   const supervisorPassword = await bcrypt.hash('supervisor123', 10);
+
+  await prisma.agent.deleteMany({
+    where: { tenantId: tenant.id, email: 'admin@demo.com' },
+  });
 
   await prisma.agent.upsert({
     where: {
-      tenantId_email: { tenantId: tenant.id, email: 'admin@demo.com' },
+      tenantId_email: { tenantId: tenant.id, email: 'demo' },
     },
-    update: { role: 'TENANT_ADMIN', agentCode: 'AG001' },
+    update: {
+      role: 'TENANT_ADMIN',
+      agentCode: 'AG001',
+      password: tenantAdminPassword,
+      name: '企业管理员',
+    },
     create: {
       tenantId: tenant.id,
-      email: 'admin@demo.com',
-      password: agentPassword,
+      email: 'demo',
+      password: tenantAdminPassword,
       name: '企业管理员',
       phone: '13800138001',
       role: 'TENANT_ADMIN',
@@ -141,8 +153,8 @@ async function main() {
 
   console.log('Seed completed:');
   console.log({
-    platform: { email: admin.email, password: 'admin123', portal: 'Platform Admin :5175' },
-    tenantAdmin: { email: 'admin@demo.com', password: 'agent123', tenantCode: 'demo001', portal: 'Tenant Admin :5177' },
+    platform: { account: admin.email, password: 'admin123', portal: 'Platform Admin :5175' },
+    tenantAdmin: { account: 'demo', password: '123456', tenantCode: 'demo001', portal: 'Tenant Admin :5177' },
     supervisor: { email: 'supervisor@demo.com', password: 'supervisor123', tenantCode: 'demo001', portal: 'Tenant Admin :5177' },
     agent: { email: 'agent@demo.com', password: 'agent123', tenantCode: 'demo001', portal: 'Agent Workbench :5174' },
     tenant: { name: tenant.name, tenantCode: tenant.tenantCode, apiKey: tenant.apiKey },

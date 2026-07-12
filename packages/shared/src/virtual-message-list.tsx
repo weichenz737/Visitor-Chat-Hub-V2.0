@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useRef, type CSSProperties, type ReactNode } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { Message } from './index';
 
@@ -23,6 +23,8 @@ export function VirtualMessageList({
   className,
   style,
 }: VirtualMessageListProps) {
+  const lockRef = useRef(false);
+
   return (
     <Virtuoso
       className={className}
@@ -33,7 +35,13 @@ export function VirtualMessageList({
       initialTopMostItemIndex={Math.max(0, messages.length - 1)}
       followOutput="smooth"
       startReached={() => {
-        if (hasMore && !loadingOlder) onLoadOlder();
+        if (!hasMore || loadingOlder || messages.length === 0 || lockRef.current) return;
+        lockRef.current = true;
+        void Promise.resolve(onLoadOlder()).finally(() => {
+          window.setTimeout(() => {
+            lockRef.current = false;
+          }, 400);
+        });
       }}
       increaseViewportBy={{ top: 200, bottom: 200 }}
       itemContent={(index, msg) => {

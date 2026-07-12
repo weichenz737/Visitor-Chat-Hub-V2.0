@@ -163,3 +163,12 @@ export async function uploadFile(
 
 export { useAuthStore } from './auth-store';
 export { useChatStore } from './store';
+export {
+  loadRememberedLogin,
+  saveRememberedLogin,
+  clearRememberedLogin,
+  loadLastTenantCode,
+  saveLastTenantCode,
+  type RememberLoginRole,
+  type RememberedLogin,
+} from './remember-login';

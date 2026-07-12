@@ -84,7 +84,7 @@ describe('Security integration (e2e)', () => {
   it('accepts platform admin login with seed credentials', async () => {
     const res = await request(app.getHttpServer())
       .post('/auth/platform/login')
-      .send({ email: 'admin@example.com', password: 'admin123' })
+      .send({ email: 'admin', password: 'admin123' })
       .expect((r) => expect([200, 201]).toContain(r.status));
     expect(res.body.accessToken).toBeTruthy();
   });
